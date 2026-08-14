@@ -1,0 +1,52 @@
+{
+  "claude-opus": {
+    "backend": "claude",
+    "model": "opus",
+    "systemPrompt": "You are a helpful assistant.",
+    "args": [
+      "--strict-mcp-config",
+      "--mcp-config", "{\"mcpServers\":{}}",
+      "--setting-sources", "",
+      "--disable-slash-commands",
+      "--allowed-tools", ""
+    ]
+  },
+  "claude-sonnet": {
+    "backend": "claude",
+    "model": "sonnet",
+    "systemPrompt": "You are a helpful assistant.",
+    "args": [
+      "--strict-mcp-config",
+      "--mcp-config", "{\"mcpServers\":{}}",
+      "--setting-sources", "",
+      "--disable-slash-commands",
+      "--allowed-tools", ""
+    ]
+  },
+  "claude-fable": {
+    "backend": "claude",
+    "model": "fable",
+    "systemPrompt": "You are a helpful assistant.",
+    "args": [
+      "--strict-mcp-config",
+      "--mcp-config", "{\"mcpServers\":{}}",
+      "--setting-sources", "",
+      "--disable-slash-commands",
+      "--allowed-tools", ""
+    ]
+  },
+  "codex": {
+    "backend": "codex",
+    "model": "gpt-5.6-sol",
+    "systemPrompt": "You are a helpful assistant.",
+    "args": []
+  },
+  "codex-fast": {
+    "backend": "codex",
+    "model": "gpt-5.6-sol",
+    "systemPrompt": "You are a helpful assistant.",
+    "args": [
+      "-c", "model_reasoning_effort=low"
+    ]
+  }
+}
