@@ -8,8 +8,6 @@
 # This makes real `claude`/`codex` CLI calls, which cost real money. Kept to
 # the minimum needed to cover every check below: short prompts, and results
 # reused across checks wherever one call can prove two things at once.
-# claude-fable is never called — the account has no Fable usage credits, so
-# calling it errors by design; that is not a bug.
 
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -130,7 +128,7 @@ if [[ $healthy -ne 1 ]]; then
 fi
 echo "server is healthy"
 
-# ---- health, discovery, ollama probes ----------------------------------------
+# ---- health & OpenAI discovery -------------------------------------------
 
 section "Health & discovery"
 
@@ -138,41 +136,73 @@ f="$WORK_DIR/health.json"
 code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/health")
 [[ "$code" == "200" && "$(jsget "$f" 'd.status')" == "ok" ]] && pass "GET /health" || fail "GET /health" "code=$code body=$(cat "$f")"
 
-f="$WORK_DIR/models.json"
+# Expected count/names come from models.json itself, not a hardcoded number,
+# so this check can't rot the next time a Model is added or removed.
+expected_count=$(jsget "models.json" 'Object.keys(d).length')
+expected_ids=$(jsget "models.json" 'Object.keys(d).sort().join(",")')
+
+f="$WORK_DIR/models-list.json"
 code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/v1/models")
 count=$(jsget "$f" 'd.data.length' 2>/dev/null || echo 0)
-ids=$(jsget "$f" 'd.data.map(m=>m.id).join(",")' 2>/dev/null || echo "")
-if [[ "$code" == "200" && "$count" -ge 5 && "$ids" == *"claude-sonnet"* && "$ids" == *"codex"* ]]; then
-  pass "GET /v1/models lists all Models ($ids)"
+ids=$(jsget "$f" 'd.data.map(m=>m.id).sort().join(",")' 2>/dev/null || echo "")
+if [[ "$code" == "200" && "$count" == "$expected_count" && "$ids" == "$expected_ids" ]]; then
+  pass "GET /v1/models lists exactly the Models in models.json ($ids)"
 else
-  fail "GET /v1/models" "code=$code count=$count ids=$ids"
+  fail "GET /v1/models" "code=$code count=$count (expected $expected_count) ids=$ids (expected $expected_ids)"
 fi
 
-f="$WORK_DIR/caps.json"
-code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/capabilities")
-allFalseTools=$(jsget "$f" 'd.data.every(m=>m.tools===false)' 2>/dev/null || echo false)
-if [[ "$code" == "200" && "$allFalseTools" == "true" ]]; then
-  pass "GET /capabilities reports tools:false for every Model"
+allLocalAiWrapper=$(jsget "$f" 'd.data.every(m=>m.local_ai_wrapper && typeof m.local_ai_wrapper.streaming==="boolean" && m.local_ai_wrapper.tools===false)' 2>/dev/null || echo false)
+noLeakedArgsOrBin=$(jsget "$f" '!JSON.stringify(d).match(/"(args|bin)"/)' 2>/dev/null || echo false)
+if [[ "$allLocalAiWrapper" == "true" && "$noLeakedArgsOrBin" == "true" ]]; then
+  pass "GET /v1/models carries local_ai_wrapper block and never leaks args/bin"
 else
-  fail "GET /capabilities" "code=$code body=$(cat "$f")"
+  fail "GET /v1/models local_ai_wrapper shape" "allLocalAiWrapper=$allLocalAiWrapper noLeakedArgsOrBin=$noLeakedArgsOrBin"
 fi
 
-f="$WORK_DIR/root.txt"
-code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/")
-[[ "$code" == "200" && "$(cat "$f")" == "Ollama is running" ]] && pass "GET / (Ollama root probe)" || fail "GET /" "code=$code body=$(cat "$f")"
+f="$WORK_DIR/models-retrieve-sonnet.json"
+code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/v1/models/claude-sonnet")
+streaming=$(jsget "$f" 'd.local_ai_wrapper.streaming' 2>/dev/null || echo "")
+if [[ "$code" == "200" && "$streaming" == "true" ]]; then
+  pass "GET /v1/models/claude-sonnet reports streaming:true"
+else
+  fail "GET /v1/models/claude-sonnet" "code=$code body=$(cat "$f")"
+fi
 
-f="$WORK_DIR/version.json"
-code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/api/version")
-[[ "$code" == "200" && -n "$(jsget "$f" 'd.version' 2>/dev/null)" ]] && pass "GET /api/version" || fail "GET /api/version" "code=$code body=$(cat "$f")"
+f="$WORK_DIR/models-retrieve-codex.json"
+code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/v1/models/codex")
+streaming=$(jsget "$f" 'd.local_ai_wrapper.streaming' 2>/dev/null || echo "")
+if [[ "$code" == "200" && "$streaming" == "false" ]]; then
+  pass "GET /v1/models/codex reports streaming:false"
+else
+  fail "GET /v1/models/codex" "code=$code body=$(cat "$f")"
+fi
 
-f="$WORK_DIR/tags.json"
-code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/api/tags")
-tagCount=$(jsget "$f" 'd.models.length' 2>/dev/null || echo 0)
-[[ "$code" == "200" && "$tagCount" -ge 5 ]] && pass "GET /api/tags" || fail "GET /api/tags" "code=$code count=$tagCount"
+listSonnet=$(jsget "$WORK_DIR/models-list.json" 'JSON.stringify(d.data.find(m=>m.id==="claude-sonnet"))' 2>/dev/null || echo "")
+retrieveSonnet=$(jsget "$WORK_DIR/models-retrieve-sonnet.json" 'JSON.stringify(d)' 2>/dev/null || echo "")
+if [[ -n "$listSonnet" && "$listSonnet" == "$retrieveSonnet" ]]; then
+  pass "GET /v1/models/claude-sonnet is byte-identical to its list entry"
+else
+  fail "list/retrieve identity" "list=$listSonnet retrieve=$retrieveSonnet"
+fi
 
-f="$WORK_DIR/show.json"
+f="$WORK_DIR/models-retrieve-unknown.json"
+code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/v1/models/nope")
+msg=$(jsget "$f" 'd.error.message' 2>/dev/null || echo "")
+if [[ "$code" == "404" && "$msg" == *"codex"* && "$msg" == *"claude-sonnet"* ]]; then
+  pass "GET /v1/models/nope -> 404 listing valid names"
+else
+  fail "GET /v1/models/nope -> 404" "code=$code body=$(cat "$f")"
+fi
+
+for path in "/" "/api/version" "/api/tags" "/capabilities"; do
+  f="$WORK_DIR/gone$(echo "$path" | tr '/' '_').json"
+  code=$(curl -s -o "$f" -w '%{http_code}' "$BASE$path")
+  [[ "$code" == "404" ]] && pass "GET $path -> 404 (Ollama/capabilities surface removed)" || fail "GET $path -> 404" "code=$code body=$(cat "$f")"
+done
+
+f="$WORK_DIR/gone_show.json"
 code=$(curl -s -o "$f" -w '%{http_code}' -X POST "$BASE/api/show" -H 'content-type: application/json' -d '{"model":"codex"}')
-[[ "$code" == "200" && -n "$(jsget "$f" 'd.modelfile' 2>/dev/null)" ]] && pass "POST /api/show (known model)" || fail "POST /api/show" "code=$code body=$(cat "$f")"
+[[ "$code" == "404" ]] && pass "POST /api/show -> 404 (Ollama surface removed)" || fail "POST /api/show -> 404" "code=$code body=$(cat "$f")"
 
 # ---- guards (no CLI process spawned, free) -----------------------------------
 

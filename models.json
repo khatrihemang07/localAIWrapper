@@ -23,18 +23,6 @@
       "--allowed-tools", ""
     ]
   },
-  "claude-fable": {
-    "backend": "claude",
-    "model": "fable",
-    "systemPrompt": "You are a helpful assistant.",
-    "args": [
-      "--strict-mcp-config",
-      "--mcp-config", "{\"mcpServers\":{}}",
-      "--setting-sources", "",
-      "--disable-slash-commands",
-      "--allowed-tools", ""
-    ]
-  },
   "codex": {
     "backend": "codex",
     "model": "gpt-5.6-sol",

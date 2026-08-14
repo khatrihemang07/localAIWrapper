@@ -11,7 +11,7 @@ import {
   sseFrame,
   SSE_DONE,
 } from "./openai.ts";
-import { listOpenAIModels, listCapabilities, OLLAMA_ROOT_MESSAGE, ollamaVersion, ollamaTags, ollamaShow } from "./discovery.ts";
+import { getOpenAIModel, listOpenAIModels } from "./discovery.ts";
 
 const port = Number(Bun.env.PORT) || 8080;
 
@@ -43,27 +43,15 @@ Bun.serve({
       return Response.json(listOpenAIModels());
     }
 
-    if (req.method === "GET" && url.pathname === "/capabilities") {
-      return Response.json(listCapabilities());
-    }
-
-    // Ollama discovery probes: enough shape for an Ollama-aware client to
-    // recognise a live daemon and enumerate Models. /api/chat is
-    // intentionally not implemented (see issue #3).
-    if (req.method === "GET" && url.pathname === "/") {
-      return new Response(OLLAMA_ROOT_MESSAGE, { headers: { "content-type": "text/plain" } });
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/version") {
-      return Response.json(ollamaVersion());
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/tags") {
-      return Response.json(ollamaTags());
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/show") {
-      return handleOllamaShow(req);
+    // Kept as a plain prefix check, matching the exact-string style used
+    // everywhere else in this fetch handler — no router/abstraction.
+    if (req.method === "GET" && url.pathname.startsWith("/v1/models/")) {
+      const id = url.pathname.slice("/v1/models/".length);
+      const model = getOpenAIModel(id);
+      if (!model) {
+        return errorResponse(`Unknown model "${id}". Valid models: ${modelNames().join(", ")}`, 404, "invalid_request_error");
+      }
+      return Response.json(model);
     }
 
     return errorResponse("Not found", 404, "not_found_error");
@@ -219,28 +207,6 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   } finally {
     cleanup();
   }
-}
-
-async function handleOllamaShow(req: Request): Promise<Response> {
-  let body: { model?: string; name?: string };
-  try {
-    body = (await req.json()) as { model?: string; name?: string };
-  } catch {
-    return errorResponse("Request body must be valid JSON", 400);
-  }
-
-  // Ollama has used both "model" and "name" for this field across versions;
-  // accept either.
-  const name = body?.model ?? body?.name;
-  if (typeof name !== "string" || name.length === 0) {
-    return errorResponse('"model" is required', 400);
-  }
-
-  const show = ollamaShow(name);
-  if (!show) {
-    return Response.json({ error: `model '${name}' not found` }, { status: 404 });
-  }
-  return Response.json(show);
 }
 
 async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {

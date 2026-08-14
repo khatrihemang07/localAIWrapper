@@ -1,6 +1,6 @@
 # localAIWrapper
 
-An OpenAI-compatible HTTP server that shells out to local coding-agent CLIs (`claude`, `codex`) so they look like plain chat models to any OpenAI or Ollama client. Zero dependencies, zero server-side state, tools disabled.
+An OpenAI-compatible HTTP server that shells out to local coding-agent CLIs (`claude`, `codex`) so they look like plain chat models to any OpenAI-compatible client. Zero dependencies, zero server-side state, tools disabled.
 
 See `CONTEXT.md` for the project's vocabulary (Backend, Model, Turn) and `docs/adr/` for why the server works the way it does.
 
@@ -35,7 +35,7 @@ Add `"stream": true` to get an SSE stream of `chat.completion.chunk` frames inst
 
 Every request is serviced by a fresh CLI process — the server holds no state between requests, so the client's full `messages` array is sent on every call (see ADR-0001).
 
-Ollama-aware clients that auto-probe for a local daemon (rather than requiring a typed base URL and model name) can also discover the server and list its Models.
+`GET /v1/models` lists every configured Model, and `GET /v1/models/{id}` returns that same object for one Model by name. Beyond the standard OpenAI fields, each object carries a `local_ai_wrapper` key with this server's own metadata (backend, underlying LLM, streaming behaviour, accepted options) — see ADR-0004 for why that lives in a namespaced key instead of at the top level, and why there is no Ollama-compatible discovery surface.
 
 ## Adding a Model
 

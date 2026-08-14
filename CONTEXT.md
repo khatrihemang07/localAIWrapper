@@ -1,6 +1,6 @@
 # localAIWrapper
 
-An OpenAI-compatible HTTP server that fronts local coding-agent CLIs so they look like plain chat models to any OpenAI or Ollama client.
+An OpenAI-compatible HTTP server that fronts local coding-agent CLIs so they look like plain chat models to any OpenAI-compatible client.
 
 ## Language
 
