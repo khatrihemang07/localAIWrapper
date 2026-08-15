@@ -63,7 +63,19 @@ Bun.serve({
 
 console.log(`localAIWrapper listening on http://127.0.0.1:${port} (max concurrency ${maxConcurrency}, turn timeout ${turnTimeoutMs}ms)`);
 
+// Per-Turn progress logging (issue: no visibility into whether a slow
+// request is queued, running, or hung). turnId correlates every line for one
+// request; timestamps let you see where the time actually went.
+function makeTurnLogger(turnId: string): (msg: string) => void {
+  return (msg: string) => console.log(`[${new Date().toISOString()}] turn=${turnId} ${msg}`);
+}
+
 async function handleChatCompletions(req: Request): Promise<Response> {
+  const turnId = crypto.randomUUID().slice(0, 8);
+  const log = makeTurnLogger(turnId);
+  const requestStartedAt = Date.now();
+  log("received request");
+
   let body: ChatCompletionRequest;
   try {
     body = (await req.json()) as ChatCompletionRequest;
@@ -107,6 +119,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   const { system, prompt } = flattenMessages(body.messages as ChatMessage[]);
   const effectiveModel = { ...modelConfig, systemPrompt: system ?? modelConfig.systemPrompt };
   const stream = body.stream === true;
+  log(`validated: model=${body.model} backend=${modelConfig.backend} stream=${stream}`);
 
   // ---- Lifecycle: concurrency cap, timeout, client-disconnect cancellation.
   //
@@ -130,6 +143,10 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     turnAbort.abort();
   }, turnTimeoutMs);
 
+  if (cliSlots.busy >= maxConcurrency) {
+    log(`waiting for a concurrency slot (${cliSlots.busy}/${maxConcurrency} busy, ${cliSlots.queued} ahead in queue)`);
+  }
+  const acquireStartedAt = Date.now();
   let release: (() => void) | undefined;
   try {
     release = await cliSlots.acquire(turnAbort.signal);
@@ -138,12 +155,14 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     req.signal.removeEventListener("abort", onClientAbort);
     if (err instanceof AbortedWhileQueuedError) {
       if (abortReason === "timeout") {
+        log(`timed out after ${Date.now() - acquireStartedAt}ms waiting for a concurrency slot`);
         return errorResponse(
           `Timed out after ${turnTimeoutMs}ms waiting for a free concurrency slot`,
           504,
           "timeout_error",
         );
       }
+      log("client disconnected while queued for a concurrency slot");
       // Client disconnected while still queued: no process was ever
       // spawned, so there's nothing to kill and no slot was taken. The
       // response body is moot since nobody is listening, but return a
@@ -151,6 +170,10 @@ async function handleChatCompletions(req: Request): Promise<Response> {
       return errorResponse("Client disconnected before the request reached a concurrency slot", 499, "client_error");
     }
     throw err;
+  }
+  const acquireWaitMs = Date.now() - acquireStartedAt;
+  if (acquireWaitMs > 50) {
+    log(`slot acquired after waiting ${acquireWaitMs}ms`);
   }
 
   // From here on a slot is held; settle() (defined below) must run exactly
@@ -173,6 +196,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     // Pre-stream failure (e.g. the binary isn't on PATH): headers were
     // never committed, so this always returns a proper error envelope, even
     // for a streaming request.
+    log(`failed to spawn ${backend.bin}: ${err instanceof Error ? err.message : String(err)}`);
     settle();
     return errorResponse(
       `Failed to start ${backend.bin}: ${err instanceof Error ? err.message : String(err)}`,
@@ -180,6 +204,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
       "backend_error",
     );
   }
+  log(`spawned ${backend.bin} pid=${proc.pid}`);
 
   // Kill the process the moment the Turn is aborted for any reason
   // (disconnect or timeout). Covers the small race between acquiring the
@@ -206,10 +231,20 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   })();
 
   if (stream) {
-    return streamResponse(proc, backend, body.model, stderrDrain, () => stderrText, () => abortReason, cleanup);
+    return streamResponse(
+      proc,
+      backend,
+      body.model,
+      stderrDrain,
+      () => stderrText,
+      () => abortReason,
+      cleanup,
+      log,
+      requestStartedAt,
+    );
   }
   try {
-    return await bufferedResponse(proc, backend, body.model, stderrDrain, () => stderrText, () => abortReason);
+    return await bufferedResponse(proc, backend, body.model, stderrDrain, () => stderrText, () => abortReason, log, requestStartedAt);
   } finally {
     cleanup();
   }
@@ -266,6 +301,8 @@ async function bufferedResponse(
   stderrDrain: Promise<void>,
   getStderr: () => string,
   getAbortReason: () => AbortReason | undefined,
+  log: (msg: string) => void,
+  requestStartedAt: number,
 ): Promise<Response> {
   let text = "";
   let usage: Usage | undefined;
@@ -281,8 +318,10 @@ async function bufferedResponse(
 
   const exitCode = await proc.exited;
   await stderrDrain;
+  const elapsedMs = Date.now() - requestStartedAt;
 
   if (getAbortReason() === "timeout") {
+    log(`timed out after ${elapsedMs}ms, process killed`);
     return errorResponse(
       `Turn exceeded the configured timeout (${turnTimeoutMs}ms) and was terminated`,
       504,
@@ -291,12 +330,15 @@ async function bufferedResponse(
   }
 
   if (error) {
+    log(`backend reported an error after ${elapsedMs}ms: ${error}`);
     return errorResponse(withStderrTail(error, getStderr()), 502, "backend_error");
   }
   if (exitCode !== 0) {
+    log(`${backend.bin} exited with code ${exitCode} after ${elapsedMs}ms`);
     return errorResponse(stderrTail(getStderr()) || `${backend.bin} exited with code ${exitCode}`, 502, "backend_error");
   }
 
+  log(`completed in ${elapsedMs}ms`);
   const response: ChatCompletionResponse = {
     id: completionId(),
     object: "chat.completion",
@@ -318,6 +360,8 @@ function streamResponse(
   getStderr: () => string,
   getAbortReason: () => AbortReason | undefined,
   onSettled: () => void,
+  log: (msg: string) => void,
+  requestStartedAt: number,
 ): Response {
   const id = completionId();
   const created = Math.floor(Date.now() / 1000);
@@ -390,6 +434,7 @@ function streamResponse(
 
         const exitCode = await proc.exited;
         await stderrDrain;
+        const elapsedMs = Date.now() - requestStartedAt;
 
         const abortReason = getAbortReason();
         if (!sawError && abortReason === "timeout") {
@@ -399,9 +444,12 @@ function streamResponse(
         }
 
         if (cancelled) {
+          log(`client disconnected mid-stream after ${elapsedMs}ms`);
           // Client already gone: nothing left to emit.
           return;
         }
+
+        log(sawError ? `stream ended with an error after ${elapsedMs}ms: ${sawError}` : `stream completed in ${elapsedMs}ms`);
 
         // Always emit a real usage count ahead of the terminal chunk, as an
         // extra chunk with empty `choices` (OpenAI's convention for

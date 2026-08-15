@@ -31,6 +31,7 @@ declare namespace Bun {
   }
 
   interface Subprocess {
+    readonly pid: number;
     readonly stdout: ReadableStream<Uint8Array>;
     readonly stderr: ReadableStream<Uint8Array>;
     readonly exited: Promise<number>;

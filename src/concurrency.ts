@@ -18,10 +18,22 @@ type Waiter = {
 
 export class Semaphore {
   private available: number;
+  private readonly max: number;
   private readonly waiters: Waiter[] = [];
 
   constructor(max: number) {
     this.available = max;
+    this.max = max;
+  }
+
+  /** Slots currently in use — for progress logging only, not for control flow. */
+  get busy(): number {
+    return this.max - this.available;
+  }
+
+  /** Requests currently queued waiting for a slot — for progress logging only. */
+  get queued(): number {
+    return this.waiters.length;
   }
 
   /**
