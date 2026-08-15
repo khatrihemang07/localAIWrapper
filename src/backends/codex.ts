@@ -52,7 +52,7 @@ function guardReservedPositional(prompt: string): string {
   return RESERVED_POSITIONALS.has(prompt) ? `${prompt} ` : prompt;
 }
 
-function buildArgs(model: ModelConfig, prompt: string, _stream: boolean): string[] {
+function buildArgs(model: ModelConfig, prompt: string, _stream: boolean, reasoningEffort?: string): string[] {
   const effectivePrompt = guardReservedPositional(
     model.systemPrompt ? `${model.systemPrompt}\n\n${prompt}` : prompt,
   );
@@ -75,6 +75,13 @@ function buildArgs(model: ModelConfig, prompt: string, _stream: boolean): string
   // -c model_reasoning_effort=low for codex-fast) — always appended, never
   // interpreted here.
   args.push(...model.args);
+
+  // Per-request override from the chat-completions body, appended after the
+  // Model's static args so it wins if both set model_reasoning_effort (see
+  // docs/adr/0005-reasoning-effort-per-request.md).
+  if (reasoningEffort) {
+    args.push("-c", `model_reasoning_effort=${reasoningEffort}`);
+  }
 
   return args;
 }

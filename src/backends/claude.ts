@@ -14,7 +14,7 @@
 import type { ModelConfig } from "../config.ts";
 import type { Backend, DecodedLine, Usage } from "./index.ts";
 
-function buildArgs(model: ModelConfig, prompt: string, stream: boolean): string[] {
+function buildArgs(model: ModelConfig, prompt: string, stream: boolean, reasoningEffort?: string): string[] {
   // The prompt must be given as the leading positional argument. Several of
   // claude's flags (e.g. --allowed-tools, --mcp-config) are variadic and
   // greedily swallow whatever comes right after them; a prompt placed after
@@ -26,6 +26,13 @@ function buildArgs(model: ModelConfig, prompt: string, stream: boolean): string[
 
   if (model.systemPrompt) {
     args.push("--system-prompt", model.systemPrompt);
+  }
+
+  // Per-request override from the chat-completions body (see
+  // docs/adr/0005-reasoning-effort-per-request.md); claude's own accepted
+  // values (low/medium/high/xhigh/max) are not validated here.
+  if (reasoningEffort) {
+    args.push("--effort", reasoningEffort);
   }
 
   // stream-json is used for both streaming and non-streaming turns so a

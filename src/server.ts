@@ -5,6 +5,7 @@ import {
   type ChatCompletionRequest,
   type ChatCompletionResponse,
   type ChatMessage,
+  type ReasoningEffort,
   completionId,
   errorResponse,
   flattenMessages,
@@ -24,6 +25,8 @@ const cliSlots = new Semaphore(maxConcurrency);
 // pick the right error message; `undefined` means it ran to its natural
 // conclusion (success or a backend-reported failure).
 type AbortReason = "client_disconnected" | "timeout";
+
+const REASONING_EFFORTS = new Set<ReasoningEffort>(["minimal", "low", "medium", "high", "xhigh", "max"]);
 
 Bun.serve({
   hostname: "127.0.0.1",
@@ -82,6 +85,9 @@ async function handleChatCompletions(req: Request): Promise<Response> {
       'This server does not support tool calling; requests containing "tools" or "functions" are rejected rather than silently ignored.',
       400,
     );
+  }
+  if (body.reasoning_effort !== undefined && !REASONING_EFFORTS.has(body.reasoning_effort)) {
+    return errorResponse(`"reasoning_effort" must be one of: ${[...REASONING_EFFORTS].join(", ")}`, 400);
   }
 
   const modelConfig = getModel(body.model);
@@ -158,7 +164,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     release?.();
   };
 
-  const args = backend.buildArgs(effectiveModel, prompt, stream);
+  const args = backend.buildArgs(effectiveModel, prompt, stream, body.reasoning_effort);
 
   let proc: ReturnType<typeof Bun.spawn>;
   try {

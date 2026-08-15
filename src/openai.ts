@@ -8,10 +8,17 @@ export type ChatMessage = {
   content: string;
 };
 
+// Superset of both backends' effort vocabularies (codex: minimal/low/medium/
+// high; claude: low/medium/high/xhigh/max). A value valid here but not for
+// the resolved model's backend fails at the CLI, not at request validation —
+// see docs/adr/0005-reasoning-effort-per-request.md.
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
 export type ChatCompletionRequest = {
   model: string;
   messages: ChatMessage[];
   stream?: boolean;
+  reasoning_effort?: ReasoningEffort;
   // Tool calling is unsupported (see the /v1/chat/completions guard in
   // server.ts): these are typed here only so a request that includes them
   // can be detected and rejected with 400, never silently stripped.

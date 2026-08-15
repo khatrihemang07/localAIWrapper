@@ -34,7 +34,7 @@ export type Backend = {
    * SSE chunk. Surfaced verbatim by GET /capabilities so clients know upfront.
    */
   streaming: boolean;
-  buildArgs(model: ModelConfig, prompt: string, stream: boolean): string[];
+  buildArgs(model: ModelConfig, prompt: string, stream: boolean, reasoningEffort?: string): string[];
   decode(line: string): DecodedLine | null;
 };
 

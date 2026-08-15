@@ -23,18 +23,34 @@
       "--allowed-tools", ""
     ]
   },
-  "codex": {
+  "claude-haiku": {
+    "backend": "claude",
+    "model": "haiku",
+    "systemPrompt": "You are a helpful assistant.",
+    "args": [
+      "--strict-mcp-config",
+      "--mcp-config", "{\"mcpServers\":{}}",
+      "--setting-sources", "",
+      "--disable-slash-commands",
+      "--allowed-tools", ""
+    ]
+  },
+  "codex-sol": {
     "backend": "codex",
     "model": "gpt-5.6-sol",
     "systemPrompt": "You are a helpful assistant.",
     "args": []
   },
-  "codex-fast": {
+  "codex-terra": {
     "backend": "codex",
-    "model": "gpt-5.6-sol",
+    "model": "gpt-5.6-terra",
     "systemPrompt": "You are a helpful assistant.",
-    "args": [
-      "-c", "model_reasoning_effort=low"
-    ]
+    "args": []
+  },
+  "codex-luna": {
+    "backend": "codex",
+    "model": "gpt-5.6-luna",
+    "systemPrompt": "You are a helpful assistant.",
+    "args": []
   }
 }
