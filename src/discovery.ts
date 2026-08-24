@@ -5,7 +5,7 @@
 // shows up with no code change.
 
 import { models } from "./config.ts";
-import { backends } from "./backends/index.ts";
+import { resolveBackend } from "./backends/index.ts";
 
 // Stamped once at process start; used as a stand-in "created" time since
 // Models have no real creation timestamp of their own.
@@ -16,7 +16,7 @@ const startedAt = Math.floor(Date.now() / 1000);
 // HTTP surface, so this list is uniform across Models; anything else an
 // OpenAI client sends (temperature, top_p, max_tokens, ...) is accepted but
 // ignored.
-const ACCEPTED_OPTIONS = ["model", "messages", "stream"] as const;
+const ACCEPTED_OPTIONS = ["model", "messages", "stream", "reasoning_effort"] as const;
 
 // Extras live under this single namespaced key rather than flat top-level
 // fields — OpenAI can add fields to the model object at any time (`tools` is
@@ -30,6 +30,12 @@ export type OpenAIModel = {
   local_ai_wrapper: {
     backend: string;
     llm: string;
+    /**
+     * How this server reaches the Backend: the vendor SDK, or a spawned CLI.
+     * Advertised because it is observable — the two Transports can differ in
+     * prompt overhead and in which binary version actually answers.
+     */
+    transport: string;
     streaming: boolean;
     tools: false;
     options: readonly string[];
@@ -39,7 +45,10 @@ export type OpenAIModel = {
 // The one place that builds a Model's HTTP representation — both list and
 // retrieve call this, so they cannot drift apart.
 function toOpenAIModel(id: string, cfg: (typeof models)[string]): OpenAIModel {
-  const backend = backends[cfg.backend];
+  // Resolved rather than looked up, so what's advertised is the Transport
+  // that would actually serve a request — including a fallback to cli when
+  // the SDK package isn't importable.
+  const resolved = resolveBackend(cfg.backend, cfg.transport);
   return {
     id,
     object: "model",
@@ -48,9 +57,10 @@ function toOpenAIModel(id: string, cfg: (typeof models)[string]): OpenAIModel {
     local_ai_wrapper: {
       backend: cfg.backend,
       llm: cfg.model,
+      transport: resolved?.transport ?? "cli",
       // Read off the Backend, never inferred from its name — a Backend with
       // streaming:false (e.g. codex) must fall out of this generically.
-      streaming: backend?.streaming ?? false,
+      streaming: resolved?.backend.streaming ?? false,
       tools: false,
       options: ACCEPTED_OPTIONS,
     },

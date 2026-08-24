@@ -1,5 +1,12 @@
-import { getModel, maxConcurrency, modelNames, turnTimeoutMs } from "./config.ts";
-import { backends, type Backend, type Usage } from "./backends/index.ts";
+import { getModel, maxConcurrency, models, modelNames, turnTimeoutMs } from "./config.ts";
+import {
+  backendExists,
+  resolveBackend,
+  validateSdkArgs,
+  type Backend,
+  type TurnRun,
+  type Usage,
+} from "./backends/index.ts";
 import { AbortedWhileQueuedError, Semaphore } from "./concurrency.ts";
 import {
   type ChatCompletionRequest,
@@ -27,6 +34,28 @@ const cliSlots = new Semaphore(maxConcurrency);
 type AbortReason = "client_disconnected" | "timeout";
 
 const REASONING_EFFORTS = new Set<ReasoningEffort>(["minimal", "low", "medium", "high", "xhigh", "max"]);
+
+// Resolve every Model's Transport at boot, not per-Turn. Two things must fail
+// loudly here rather than degrade quietly at request time: a Model naming a
+// Backend that doesn't exist, and a Model whose raw `args` can't be expressed
+// as SDK options (see the translation tables in the Backend files). The latter
+// matters most — silently dropping a stripping flag yields a Turn that still
+// looks like it worked while costing more and being less sandboxed.
+for (const [name, cfg] of Object.entries(models)) {
+  if (!backendExists(cfg.backend)) {
+    throw new Error(`models.json: model "${name}" names unknown backend "${cfg.backend}"`);
+  }
+  const resolved = resolveBackend(cfg.backend, cfg.transport)!;
+  if (resolved.transport === "sdk") {
+    validateSdkArgs(cfg.backend, cfg);
+  }
+  if (resolved.fellBack) {
+    console.warn(
+      `[startup] model "${name}" asked for the sdk Transport, but the ${cfg.backend} SDK package ` +
+        `could not be imported — falling back to the cli Transport.`,
+    );
+  }
+}
 
 Bun.serve({
   hostname: "127.0.0.1",
@@ -111,15 +140,16 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     );
   }
 
-  const backend = backends[modelConfig.backend];
-  if (!backend) {
+  const resolved = resolveBackend(modelConfig.backend, modelConfig.transport);
+  if (!resolved) {
     return errorResponse(`Unknown backend "${modelConfig.backend}" for model "${body.model}"`, 500, "server_error");
   }
+  const backend = resolved.backend;
 
   const { system, prompt } = flattenMessages(body.messages as ChatMessage[]);
   const effectiveModel = { ...modelConfig, systemPrompt: system ?? modelConfig.systemPrompt };
   const stream = body.stream === true;
-  log(`validated: model=${body.model} backend=${modelConfig.backend} stream=${stream}`);
+  log(`validated: model=${body.model} backend=${backend.label} stream=${stream}`);
 
   // ---- Lifecycle: concurrency cap, timeout, client-disconnect cancellation.
   //
@@ -187,103 +217,42 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     release?.();
   };
 
-  const args = backend.buildArgs(effectiveModel, prompt, stream, body.reasoning_effort);
-
-  let proc: ReturnType<typeof Bun.spawn>;
+  // The Backend owns its own execution from here: the cli Transport spawns
+  // and drains a process, the sdk Transport drives a vendor library. Both
+  // hand back the same TurnRun, and both listen to turnAbort — so an
+  // abandoned or overlong Turn is torn down without this function knowing
+  // which kind of thing it is tearing down.
+  let run: TurnRun;
   try {
-    proc = Bun.spawn([backend.bin, ...args], { stdout: "pipe", stderr: "pipe" });
+    run = backend.run(
+      { model: effectiveModel, prompt, stream, reasoningEffort: body.reasoning_effort },
+      turnAbort.signal,
+    );
   } catch (err) {
     // Pre-stream failure (e.g. the binary isn't on PATH): headers were
     // never committed, so this always returns a proper error envelope, even
     // for a streaming request.
-    log(`failed to spawn ${backend.bin}: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    log(`failed to start ${backend.label}: ${message}`);
     settle();
-    return errorResponse(
-      `Failed to start ${backend.bin}: ${err instanceof Error ? err.message : String(err)}`,
-      502,
-      "backend_error",
-    );
+    return errorResponse(`Failed to start ${backend.label}: ${message}`, 502, "backend_error");
   }
-  log(`spawned ${backend.bin} pid=${proc.pid}`);
-
-  // Kill the process the moment the Turn is aborted for any reason
-  // (disconnect or timeout). Covers the small race between acquiring the
-  // slot and spawning, and — for the non-streaming path, which has no
-  // ReadableStream cancel() hook of its own — is the *only* thing that
-  // kills the process on disconnect.
-  if (turnAbort.signal.aborted) {
-    proc.kill();
-  }
-  const killOnAbort = () => proc.kill();
-  turnAbort.signal.addEventListener("abort", killOnAbort);
-  const cleanup = () => {
-    turnAbort.signal.removeEventListener("abort", killOnAbort);
-    settle();
-  };
-
-  // Drain stderr concurrently so the pipe never backs up; keep the tail in
-  // case the process exits without a decodable error line.
-  let stderrText = "";
-  const stderrDrain = (async () => {
-    for await (const chunk of readLines(proc.stderr)) {
-      stderrText += chunk + "\n";
-    }
-  })();
+  log(`started ${backend.label}`);
 
   if (stream) {
-    return streamResponse(
-      proc,
-      backend,
-      body.model,
-      stderrDrain,
-      () => stderrText,
-      () => abortReason,
-      cleanup,
-      log,
-      requestStartedAt,
-    );
+    return streamResponse(run, backend, body.model, () => abortReason, settle, log, requestStartedAt);
   }
   try {
-    return await bufferedResponse(proc, backend, body.model, stderrDrain, () => stderrText, () => abortReason, log, requestStartedAt);
+    return await bufferedResponse(run, backend, body.model, () => abortReason, log, requestStartedAt);
   } finally {
-    cleanup();
+    settle();
   }
 }
 
-async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let newlineIndex: number;
-      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-        yield buffer.slice(0, newlineIndex);
-        buffer = buffer.slice(newlineIndex + 1);
-      }
-    }
-    if (buffer) yield buffer;
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-// Only the last STDERR_TAIL_CHARS of stderr are surfaced to the client —
-// "the tail", per issue #5 — so a runaway or noisy CLI can't blow up the
-// error envelope.
-const STDERR_TAIL_CHARS = 4000;
-
-function stderrTail(text: string): string {
-  const trimmed = text.trim();
-  return trimmed.length > STDERR_TAIL_CHARS ? trimmed.slice(-STDERR_TAIL_CHARS) : trimmed;
-}
-
-function withStderrTail(message: string, stderr: string): string {
-  const tail = stderrTail(stderr);
-  return tail ? `${message} (stderr: ${tail})` : message;
+// Appends a Backend's diagnostic context (a stderr tail from the cli
+// Transport; empty from the sdk Transport, which has none) to a message.
+function withDetail(message: string, detail: string): string {
+  return detail ? `${message} (stderr: ${detail})` : message;
 }
 
 function usageChunkPayload(usage: Usage) {
@@ -295,11 +264,9 @@ function usageChunkPayload(usage: Usage) {
 }
 
 async function bufferedResponse(
-  proc: ReturnType<typeof Bun.spawn>,
+  run: TurnRun,
   backend: Backend,
   model: string,
-  stderrDrain: Promise<void>,
-  getStderr: () => string,
   getAbortReason: () => AbortReason | undefined,
   log: (msg: string) => void,
   requestStartedAt: number,
@@ -308,20 +275,17 @@ async function bufferedResponse(
   let usage: Usage | undefined;
   let error: string | undefined;
 
-  for await (const line of readLines(proc.stdout)) {
-    const decoded = backend.decode(line);
-    if (!decoded) continue;
+  for await (const decoded of run.events) {
     if (typeof decoded.text === "string") text = decoded.text;
     if (decoded.usage) usage = decoded.usage;
     if (decoded.error) error = decoded.error;
   }
 
-  const exitCode = await proc.exited;
-  await stderrDrain;
+  const outcome = await run.finish();
   const elapsedMs = Date.now() - requestStartedAt;
 
   if (getAbortReason() === "timeout") {
-    log(`timed out after ${elapsedMs}ms, process killed`);
+    log(`timed out after ${elapsedMs}ms, turn terminated`);
     return errorResponse(
       `Turn exceeded the configured timeout (${turnTimeoutMs}ms) and was terminated`,
       504,
@@ -331,11 +295,11 @@ async function bufferedResponse(
 
   if (error) {
     log(`backend reported an error after ${elapsedMs}ms: ${error}`);
-    return errorResponse(withStderrTail(error, getStderr()), 502, "backend_error");
+    return errorResponse(withDetail(error, outcome.detail), 502, "backend_error");
   }
-  if (exitCode !== 0) {
-    log(`${backend.bin} exited with code ${exitCode} after ${elapsedMs}ms`);
-    return errorResponse(stderrTail(getStderr()) || `${backend.bin} exited with code ${exitCode}`, 502, "backend_error");
+  if (outcome.failure) {
+    log(`${outcome.failure} after ${elapsedMs}ms`);
+    return errorResponse(outcome.detail || outcome.failure, 502, "backend_error");
   }
 
   log(`completed in ${elapsedMs}ms`);
@@ -353,11 +317,9 @@ async function bufferedResponse(
 }
 
 function streamResponse(
-  proc: ReturnType<typeof Bun.spawn>,
+  run: TurnRun,
   backend: Backend,
   model: string,
-  stderrDrain: Promise<void>,
-  getStderr: () => string,
   getAbortReason: () => AbortReason | undefined,
   onSettled: () => void,
   log: (msg: string) => void,
@@ -399,10 +361,7 @@ function streamResponse(
       };
 
       try {
-        for await (const line of readLines(proc.stdout)) {
-          const decoded = backend.decode(line);
-          if (!decoded) continue;
-
+        for await (const decoded of run.events) {
           if (decoded.error) {
             sawError = decoded.error;
             if (decoded.usage) usage = decoded.usage;
@@ -432,15 +391,14 @@ function streamResponse(
           }
         }
 
-        const exitCode = await proc.exited;
-        await stderrDrain;
+        const outcome = await run.finish();
         const elapsedMs = Date.now() - requestStartedAt;
 
         const abortReason = getAbortReason();
         if (!sawError && abortReason === "timeout") {
           sawError = `Turn exceeded the configured timeout (${turnTimeoutMs}ms) and was terminated`;
-        } else if (!sawError && exitCode !== 0 && abortReason !== "client_disconnected") {
-          sawError = withStderrTail(`${backend.bin} exited with code ${exitCode}`, getStderr());
+        } else if (!sawError && outcome.failure && abortReason !== "client_disconnected") {
+          sawError = withDetail(outcome.failure, outcome.detail);
         }
 
         if (cancelled) {
@@ -519,7 +477,7 @@ function streamResponse(
       // abandoned Turn must not keep burning tokens to completion, and the
       // process must not become an orphan.
       cancelled = true;
-      proc.kill();
+      run.kill();
       settle();
     },
   });

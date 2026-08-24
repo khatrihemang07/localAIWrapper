@@ -8,6 +8,17 @@ export type ModelConfig = {
   model: string;
   systemPrompt?: string;
   args: string[];
+  /**
+   * Which Transport reaches this Model's Backend. Omitted means "prefer the
+   * sdk Transport, fall back to cli if the vendor package won't import".
+   * Pin to `"cli"` for a Model whose raw `args` can't be expressed as SDK
+   * options, or to keep a Model on the spawn path deliberately.
+   *
+   * The literal union is duplicated from src/backends/index.ts rather than
+   * imported, so that loading config can never depend on a Backend module —
+   * those run a top-level `await import(...)` to probe SDK availability.
+   */
+  transport?: "sdk" | "cli";
 };
 
 function validate(raw: unknown): Record<string, ModelConfig> {
@@ -35,12 +46,16 @@ function validate(raw: unknown): Record<string, ModelConfig> {
     if (!Array.isArray(v.args) || !v.args.every((a) => typeof a === "string")) {
       throw new Error(`models.json: model "${name}" must have an "args" array of strings`);
     }
+    if (v.transport !== undefined && v.transport !== "sdk" && v.transport !== "cli") {
+      throw new Error(`models.json: model "${name}" has a "transport" that is not "sdk" or "cli"`);
+    }
 
     result[name] = {
       backend: v.backend,
       model: v.model,
       systemPrompt: v.systemPrompt as string | undefined,
       args: v.args as string[],
+      transport: v.transport as "sdk" | "cli" | undefined,
     };
   }
 
