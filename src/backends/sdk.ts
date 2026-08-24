@@ -56,12 +56,25 @@ export function runSdkTurn(label: string, start: SdkTurnSource, signal: AbortSig
   })();
 
   async function* events(): AsyncGenerator<DecodedLine> {
-    while (true) {
-      while (queue.length > 0) yield queue.shift()!;
-      if (ended) return;
-      await new Promise<void>((resolve) => {
-        wake = resolve;
-      });
+    try {
+      while (true) {
+        while (queue.length > 0) yield queue.shift()!;
+        if (ended) return;
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      }
+    } finally {
+      // The streaming path breaks out of this generator the moment it sees a
+      // terminal DecodedLine, and then awaits finish(). On the cli Transport
+      // the equivalent wait is on `proc.exited`, which the OS guarantees will
+      // resolve. Here it would instead rest on the vendor iterable choosing to
+      // close promptly after its terminal event — plausible, but unverified,
+      // and a vendor that kept the generator open would hang finish() and hold
+      // the Turn's concurrency slot forever. Aborting on the way out removes
+      // the assumption: whether the consumer broke early or drained to the
+      // end, the producer is told to stop and `done` resolves.
+      abort.abort();
     }
   }
 

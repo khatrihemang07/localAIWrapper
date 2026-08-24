@@ -42,6 +42,27 @@ export async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGener
 }
 
 /**
+ * Wraps a Backend's event decoder for stdout consumption: trim, parse, decode,
+ * and swallow anything that isn't JSON. Only the cli Transport needs this —
+ * the sdk Transport is handed decoded objects — but both Backends' decoders
+ * are shaped identically, so the wrapper lives here rather than being written
+ * out twice.
+ */
+export function jsonLineDecoder(
+  decodeEvent: (obj: any) => DecodedLine | null,
+): (line: string) => DecodedLine | null {
+  return (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return null;
+    try {
+      return decodeEvent(JSON.parse(trimmed));
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
  * Spawns `bin` and turns its stdout into DecodedLines. Throws synchronously if
  * the binary can't be started (e.g. not on PATH) — the caller is still
  * pre-headers at that point and can return a proper error envelope even for a

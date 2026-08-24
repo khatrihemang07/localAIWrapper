@@ -1,4 +1,4 @@
-// The adapter boundary: nothing outside a Backend file (e.g. src/backends/claude.ts)
+// The Backend boundary: nothing outside a Backend file (e.g. src/backends/claude.ts)
 // may know a specific CLI binary, its flags, or a vendor SDK exists.
 //
 // A Backend pairs one coding agent with one Transport — the way we reach it.
@@ -119,7 +119,11 @@ const families: Record<string, BackendFamily> = {
 export type Resolved = {
   backend: Backend;
   transport: Transport;
-  /** Set when the Model asked for sdk but the SDK package wasn't importable. */
+  /**
+   * Set when the sdk Transport was preferred — explicitly or by omitting
+   * `transport` — but the vendor package wouldn't import, so this resolved to
+   * cli instead.
+   */
   fellBack: boolean;
 };
 
@@ -148,7 +152,14 @@ export function resolveBackend(name: string, requested?: Transport): Resolved | 
   if (family.sdk) {
     return { backend: family.sdk, transport: "sdk", fellBack: false };
   }
-  return { backend: family.cli, transport: "cli", fellBack: requested === "sdk" };
+  // Reaching here means the sdk Transport was wanted — either asked for
+  // explicitly or by omission, since `"cli"` already returned above — and the
+  // vendor package wouldn't import. Always a fallback, never conditional on
+  // how it was asked for: omitting `transport` is the documented way to
+  // prefer sdk, and it is what every Model in models.json does, so keying the
+  // warning off an explicit `"sdk"` would silence it in exactly the case it
+  // exists for.
+  return { backend: family.cli, transport: "cli", fellBack: true };
 }
 
 /** Throws if `model`'s raw `args` can't be translated for the sdk Transport. */

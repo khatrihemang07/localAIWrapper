@@ -60,7 +60,7 @@
 
 import type { ModelConfig } from "../config.ts";
 import type { Backend, DecodedLine, TurnRequest, TurnRun, Usage } from "./index.ts";
-import { runCli } from "./cli.ts";
+import { jsonLineDecoder, runCli } from "./cli.ts";
 import { pairArgs, runSdkTurn } from "./sdk.ts";
 
 const BIN = "codex";
@@ -93,15 +93,7 @@ function decodeEvent(obj: any): DecodedLine | null {
   return null;
 }
 
-function decodeLine(line: string): DecodedLine | null {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  try {
-    return decodeEvent(JSON.parse(trimmed));
-  } catch {
-    return null;
-  }
-}
+const decodeLine = jsonLineDecoder(decodeEvent);
 
 // `error.message` on turn.failed is itself a JSON-encoded string (e.g.
 // '{"type":"error","status":400,"error":{"message":"..."}}'); unwrap it
@@ -239,11 +231,6 @@ export const codexSdkBackend: Backend | null = sdk
       streaming: false,
       run(req: TurnRequest, signal: AbortSignal): TurnRun {
         const configOverrides = translateArgs(req.model);
-        // Appended last so a per-request effort wins over a Model's static
-        // override, matching the cli Transport's argv ordering (ADR-0005).
-        if (req.reasoningEffort) {
-          configOverrides.push(`model_reasoning_effort=${req.reasoningEffort}`);
-        }
 
         return runSdkTurn(
           BIN,
@@ -253,6 +240,15 @@ export const codexSdkBackend: Backend | null = sdk
               model: req.model.model,
               sandboxMode: "read-only",
               skipGitRepoCheck: true,
+              // The typed thread option, not another entry appended to
+              // configOverrides. The SDK documents configOverrides as applied
+              // "before SDK-managed or thread-specific overrides", so this is
+              // *documented* to win over a Model's static
+              // `-c model_reasoning_effort=...` — which is the precedence
+              // ADR-0005 requires. Appending a second raw override instead
+              // would rest the same guarantee on an unverified assumption
+              // that repeated --config flags resolve last-wins.
+              ...(req.reasoningEffort ? { modelReasoningEffort: req.reasoningEffort } : {}),
             });
             const { events } = await thread.runStreamed(composePrompt(req.model, req.prompt), {
               signal: abortSignal,

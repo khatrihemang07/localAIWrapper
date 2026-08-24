@@ -30,7 +30,7 @@
 
 import type { ModelConfig } from "../config.ts";
 import type { Backend, DecodedLine, TurnRequest, TurnRun, Usage } from "./index.ts";
-import { runCli } from "./cli.ts";
+import { jsonLineDecoder, runCli } from "./cli.ts";
 import { pairArgs, runSdkTurn } from "./sdk.ts";
 
 const BIN = "claude";
@@ -87,15 +87,7 @@ function decodeEvent(obj: any): DecodedLine | null {
   return null;
 }
 
-function decodeLine(line: string): DecodedLine | null {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  try {
-    return decodeEvent(JSON.parse(trimmed));
-  } catch {
-    return null;
-  }
-}
+const decodeLine = jsonLineDecoder(decodeEvent);
 
 // ---- cli Transport ---------------------------------------------------------
 
