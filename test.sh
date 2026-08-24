@@ -47,6 +47,7 @@ SERVER2_PID=""
 # cleanup() runs under `set -u` and may fire before that section is reached.
 ALT_DIR=""
 ALT_LOG=""
+BAD_DIR=""
 kill_server() { # kill_server <pid>
   local pid="$1"
   [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || return 0
@@ -61,7 +62,7 @@ kill_server() { # kill_server <pid>
 cleanup() {
   kill_server "$SERVER_PID"
   kill_server "$SERVER2_PID"
-  rm -rf "$WORK_DIR" "$LOG_FILE" "$ALT_DIR" "$ALT_LOG"
+  rm -rf "$WORK_DIR" "$LOG_FILE" "$ALT_DIR" "$ALT_LOG" "$BAD_DIR"
 }
 trap cleanup EXIT INT TERM
 
@@ -168,13 +169,13 @@ else
   fail "GET /v1/models/claude-sonnet" "code=$code body=$(cat "$f")"
 fi
 
-f="$WORK_DIR/models-retrieve-codex.json"
-code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/v1/models/codex")
+f="$WORK_DIR/models-retrieve-codex-sol.json"
+code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/v1/models/codex-sol")
 streaming=$(jsget "$f" 'd.local_ai_wrapper.streaming' 2>/dev/null || echo "")
 if [[ "$code" == "200" && "$streaming" == "false" ]]; then
-  pass "GET /v1/models/codex reports streaming:false"
+  pass "GET /v1/models/codex-sol reports streaming:false"
 else
-  fail "GET /v1/models/codex" "code=$code body=$(cat "$f")"
+  fail "GET /v1/models/codex-sol" "code=$code body=$(cat "$f")"
 fi
 
 listSonnet=$(jsget "$WORK_DIR/models-list.json" 'JSON.stringify(d.data.find(m=>m.id==="claude-sonnet"))' 2>/dev/null || echo "")
@@ -201,7 +202,7 @@ for path in "/" "/api/version" "/api/tags" "/capabilities"; do
 done
 
 f="$WORK_DIR/gone_show.json"
-code=$(curl -s -o "$f" -w '%{http_code}' -X POST "$BASE/api/show" -H 'content-type: application/json' -d '{"model":"codex"}')
+code=$(curl -s -o "$f" -w '%{http_code}' -X POST "$BASE/api/show" -H 'content-type: application/json' -d '{"model":"codex-sol"}')
 [[ "$code" == "404" ]] && pass "POST /api/show -> 404 (Ollama surface removed)" || fail "POST /api/show -> 404" "code=$code body=$(cat "$f")"
 
 # ---- guards (no CLI process spawned, free) -----------------------------------
@@ -209,11 +210,11 @@ code=$(curl -s -o "$f" -w '%{http_code}' -X POST "$BASE/api/show" -H 'content-ty
 section "Guards"
 
 f="$WORK_DIR/tools.json"
-code=$(post "$f" '{"model":"codex-fast","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"x"}}]}')
+code=$(post "$f" '{"model":"codex-sol","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"x"}}]}')
 [[ "$code" == "400" ]] && pass '"tools" in request -> 400' || fail '"tools" -> 400' "code=$code body=$(cat "$f")"
 
 f="$WORK_DIR/functions.json"
-code=$(post "$f" '{"model":"codex-fast","messages":[{"role":"user","content":"hi"}],"functions":[{"name":"x"}]}')
+code=$(post "$f" '{"model":"codex-sol","messages":[{"role":"user","content":"hi"}],"functions":[{"name":"x"}]}')
 [[ "$code" == "400" ]] && pass '"functions" in request -> 400' || fail '"functions" -> 400' "code=$code body=$(cat "$f")"
 
 f="$WORK_DIR/unknown-model.json"
@@ -267,7 +268,7 @@ section "Single-chunk streaming (codex) + usage"
 
 f="$WORK_DIR/stream-codex.sse"
 curl -s -N -X POST "$BASE/v1/chat/completions" -H 'content-type: application/json' \
-  -d '{"model":"codex-fast","messages":[{"role":"user","content":"Reply with exactly one word: pong"}],"stream":true}' \
+  -d '{"model":"codex-sol","messages":[{"role":"user","content":"Reply with exactly one word: pong"}],"stream":true}' \
   -o "$f"
 read -r deltaChunks sawUsage usageTotal sawDone sawFinish <<<"$(sse_stats "$f")"
 if [[ "$deltaChunks" == "1" && "$sawDone" == "1" && "$sawFinish" == "1" ]]; then
@@ -285,7 +286,7 @@ section "Multi-turn history + non-streaming usage (codex)"
 
 f="$WORK_DIR/multiturn.json"
 code=$(post "$f" '{
-  "model": "codex-fast",
+  "model": "codex-sol",
   "messages": [
     {"role": "user", "content": "My favorite number is 42. Just acknowledge that."},
     {"role": "assistant", "content": "Got it, your favorite number is 42."},
@@ -295,7 +296,7 @@ code=$(post "$f" '{
 content=$(jsget "$f" 'd.choices[0].message.content' 2>/dev/null || echo "")
 total=$(jsget "$f" 'd.usage.total_tokens' 2>/dev/null || echo 0)
 if [[ "$code" == "200" && "$content" == *"42"* ]]; then
-  pass "multi-turn history is honoured (codex-fast): \"$content\""
+  pass "multi-turn history is honoured (codex-sol): \"$content\""
 else
   fail "multi-turn history (codex)" "code=$code body=$(cat "$f")"
 fi
@@ -353,7 +354,7 @@ for i in $(seq 1 10); do
   (
     code=$(curl -s -o "$CONC_DIR/resp_$i.json" -w '%{http_code}' -X POST "$BASE/v1/chat/completions" \
       -H 'content-type: application/json' \
-      -d '{"model":"codex-fast","messages":[{"role":"user","content":"Reply with exactly one word: ok"}]}')
+      -d '{"model":"codex-sol","messages":[{"role":"user","content":"Reply with exactly one word: ok"}]}')
     echo "$code" >"$CONC_DIR/code_$i"
   ) &
   CONC_PIDS+=($!)
@@ -409,6 +410,57 @@ fi
 # CLI exit in well under a second, while any real model call takes longer than
 # 1.5s -- so neither test can be satisfied by the other's mechanism.
 
+# ---- untranslatable args are a boot failure, not a silent drop ----------------
+#
+# models.json carries raw CLI flags; the sdk Transport has no argv to append
+# them to, so each is translated to a typed SDK option. A flag with no
+# translation must abort startup. The failure mode this guards against is
+# silent: dropping --allowed-tools "" would re-enable the tool schemas that
+# ADR-0002's harness strip exists to remove, producing a Turn that still looks
+# like it worked while costing more and being less sandboxed.
+
+section "Untranslatable args fail the boot"
+
+BAD_DIR="$(mktemp -d)"
+cp -R src package.json tsconfig.json "$BAD_DIR/" 2>/dev/null
+bun -e '
+  const fs = require("fs");
+  const models = JSON.parse(fs.readFileSync("models.json", "utf8"));
+  // No "transport", so this Model resolves to the sdk Transport, where the
+  // flag has no typed equivalent.
+  models["untranslatable"] = {
+    backend: "claude",
+    model: "haiku",
+    systemPrompt: "You are a helpful assistant.",
+    args: ["--definitely-not-a-real-flag"],
+  };
+  fs.writeFileSync(process.argv[1] + "/models.json", JSON.stringify(models, null, 2));
+' "$BAD_DIR"
+
+BAD_PORT="$(find_free_port 8961)"
+bad_out="$(PORT="$BAD_PORT" bun run "$BAD_DIR/src/server.ts" 2>&1 || true)"
+
+if [[ "$bad_out" == *"cannot express"* && "$bad_out" == *"--definitely-not-a-real-flag"* ]]; then
+  pass "untranslatable args abort startup"
+else
+  fail "untranslatable args abort startup" "output=$bad_out"
+fi
+
+if [[ "$bad_out" == *"transport"* && "$bad_out" == *"cli"* ]]; then
+  pass "the startup error names the cli escape hatch"
+else
+  fail "the startup error names the cli escape hatch" "output=$bad_out"
+fi
+
+# A healthy server must NOT be left behind by that failed boot.
+if curl -fsS "http://127.0.0.1:$BAD_PORT/health" >/dev/null 2>&1; then
+  fail "failed boot does not serve traffic" "server on $BAD_PORT answered /health"
+else
+  pass "failed boot does not serve traffic"
+fi
+
+rm -rf "$BAD_DIR"
+
 section "Timeout and backend-failure error envelopes"
 
 ALT_DIR="$(mktemp -d)"
@@ -419,10 +471,15 @@ bun -e '
   const models = JSON.parse(fs.readFileSync("models.json", "utf8"));
   // A Model whose args are guaranteed to make the CLI reject its own invocation
   // and exit non-zero, without ever reaching the model (so it costs nothing).
+  // Pinned to the cli Transport deliberately: the whole point is a *binary*
+  // rejecting its own argv, and the sdk Transport has no argv to reject. It
+  // would also refuse to boot at all, since an untranslatable flag is a
+  // startup error there (see the "untranslatable args" check below).
   models["broken-on-purpose"] = {
     backend: "codex",
     model: "gpt-5.6-sol",
     systemPrompt: "You are a helpful assistant.",
+    transport: "cli",
     args: ["--definitely-not-a-real-flag"],
   };
   fs.writeFileSync(process.argv[1] + "/models.json", JSON.stringify(models, null, 2));
