@@ -9,7 +9,8 @@
       "--setting-sources", "",
       "--disable-slash-commands",
       "--allowed-tools", ""
-    ]
+    ],
+    "contextWindow": 200000
   },
   "claude-sonnet": {
     "backend": "claude",
@@ -21,7 +22,8 @@
       "--setting-sources", "",
       "--disable-slash-commands",
       "--allowed-tools", ""
-    ]
+    ],
+    "contextWindow": 200000
   },
   "claude-haiku": {
     "backend": "claude",
@@ -33,24 +35,28 @@
       "--setting-sources", "",
       "--disable-slash-commands",
       "--allowed-tools", ""
-    ]
+    ],
+    "contextWindow": 200000
   },
   "codex-sol": {
     "backend": "codex",
     "model": "gpt-5.6-sol",
     "systemPrompt": "You are a helpful assistant.",
-    "args": []
+    "args": [],
+    "contextWindow": 272000
   },
   "codex-terra": {
     "backend": "codex",
     "model": "gpt-5.6-terra",
     "systemPrompt": "You are a helpful assistant.",
-    "args": []
+    "args": [],
+    "contextWindow": 272000
   },
   "codex-luna": {
     "backend": "codex",
     "model": "gpt-5.6-luna",
     "systemPrompt": "You are a helpful assistant.",
-    "args": []
+    "args": [],
+    "contextWindow": 272000
   }
 }

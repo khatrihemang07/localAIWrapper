@@ -19,6 +19,16 @@ export type ModelConfig = {
    * those run a top-level `await import(...)` to probe SDK availability.
    */
   transport?: "sdk" | "cli";
+  /**
+   * How many tokens the underlying model's own context window holds.
+   * Optional and otherwise unused by this server — nothing here trims a
+   * Turn to fit it — surfaced purely as `local_ai_wrapper.contextWindow` on
+   * this Model's `GET /v1/models`/`GET /v1/models/{id}` entry (see
+   * src/discovery.ts) so a client can size its own context budget instead
+   * of guessing. Added for meologue issue #97, which reads it with a
+   * conservative fallback when a Model omits it.
+   */
+  contextWindow?: number;
 };
 
 function validate(raw: unknown): Record<string, ModelConfig> {
@@ -49,6 +59,9 @@ function validate(raw: unknown): Record<string, ModelConfig> {
     if (v.transport !== undefined && v.transport !== "sdk" && v.transport !== "cli") {
       throw new Error(`models.json: model "${name}" has a "transport" that is not "sdk" or "cli"`);
     }
+    if (v.contextWindow !== undefined && (typeof v.contextWindow !== "number" || v.contextWindow <= 0)) {
+      throw new Error(`models.json: model "${name}" has a "contextWindow" that is not a positive number`);
+    }
 
     result[name] = {
       backend: v.backend,
@@ -56,6 +69,7 @@ function validate(raw: unknown): Record<string, ModelConfig> {
       systemPrompt: v.systemPrompt as string | undefined,
       args: v.args as string[],
       transport: v.transport as "sdk" | "cli" | undefined,
+      contextWindow: v.contextWindow as number | undefined,
     };
   }
 

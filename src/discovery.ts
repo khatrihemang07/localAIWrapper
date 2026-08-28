@@ -39,6 +39,15 @@ export type OpenAIModel = {
     streaming: boolean;
     tools: false;
     options: readonly string[];
+    /**
+     * How many tokens this Model's underlying model holds, when
+     * `models.json` says (`ModelConfig.contextWindow`, src/config.ts).
+     * Omitted — not `0` or `null` — when a Model doesn't say, so a client
+     * can tell "unknown" from "genuinely tiny" without a sentinel value.
+     * Added for meologue issue #97, which reads this with a conservative
+     * fallback for exactly that omitted case.
+     */
+    contextWindow?: number;
   };
 };
 
@@ -63,6 +72,7 @@ function toOpenAIModel(id: string, cfg: (typeof models)[string]): OpenAIModel {
       streaming: resolved?.backend.streaming ?? false,
       tools: false,
       options: ACCEPTED_OPTIONS,
+      ...(cfg.contextWindow !== undefined ? { contextWindow: cfg.contextWindow } : {}),
     },
   };
 }
