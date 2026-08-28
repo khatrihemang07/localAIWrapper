@@ -60,6 +60,15 @@ for (const [name, cfg] of Object.entries(models)) {
 Bun.serve({
   hostname: "127.0.0.1",
   port,
+  // Bun closes a connection that goes this many seconds without a byte, and
+  // its default is 10 — which is shorter than the gap before the *first*
+  // chunk of a real agent Turn. A backend given a large prompt spends that
+  // long reading it before it emits any token, so the default silently drops
+  // exactly the streaming requests this server exists to carry, while short
+  // prompts stream fine and make it look like streaming works. 255 is Bun's
+  // own maximum; nothing here wants a shorter one, because a Turn that has
+  // genuinely stalled is the client's abort to make, not ours.
+  idleTimeout: 255,
   async fetch(req) {
     const url = new URL(req.url);
 

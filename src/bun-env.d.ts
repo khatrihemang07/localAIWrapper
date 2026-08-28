@@ -9,6 +9,8 @@ declare namespace Bun {
   interface ServeOptions {
     hostname?: string;
     port?: number;
+    /** Seconds a connection may go without a byte before Bun closes it. Bun's own default is 10 and its maximum is 255. */
+    idleTimeout?: number;
     fetch(req: Request): Response | Promise<Response>;
   }
 
