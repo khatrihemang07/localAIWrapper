@@ -8,22 +8,22 @@ export type ChatMessage = {
   content: string;
 };
 
-// Superset of both backends' effort vocabularies (codex: minimal/low/medium/
-// high; claude: low/medium/high/xhigh/max). A value valid here but not for
-// the resolved model's backend fails at the CLI, not at request validation —
-// see docs/adr/0005-reasoning-effort-per-request.md.
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-
 export type ChatCompletionRequest = {
   model: string;
   messages: ChatMessage[];
   stream?: boolean;
-  reasoning_effort?: ReasoningEffort;
+  /** Validated against the resolved Model in src/requestOptions.ts. */
+  reasoning_effort?: string;
+  web?: boolean;
+  access?: string;
+  workdir?: string;
+  response_format?: unknown;
   // Tool calling is unsupported (see the /v1/chat/completions guard in
   // server.ts): these are typed here only so a request that includes them
   // can be detected and rejected with 400, never silently stripped.
   tools?: unknown[];
   functions?: unknown[];
+  tool_choice?: unknown;
 };
 
 export type ChatCompletionResponse = {
@@ -87,6 +87,16 @@ export function flattenMessages(messages: ChatMessage[]): { system?: string; pro
     system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
     prompt: turns.join("\n\n"),
   };
+}
+
+/**
+ * A prompt needs at least one user or assistant message. A system-only list
+ * has nothing for the Turn to answer, so it is refused before any CLI spawns.
+ * Returns the 400 message, or undefined when the list is acceptable.
+ */
+export function checkMessages(messages: ChatMessage[]): string | undefined {
+  const hasTurn = messages.some((m) => m.role === "user" || m.role === "assistant");
+  return hasTurn ? undefined : `"messages" must include at least one "user" or "assistant" message`;
 }
 
 export function sseFrame(data: unknown): string {

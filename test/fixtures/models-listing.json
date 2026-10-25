@@ -1,0 +1,305 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "claude-opus",
+      "object": "model",
+      "owned_by": "claude",
+      "local_ai_wrapper": {
+        "backend": "claude",
+        "llm": "opus",
+        "streaming": true,
+        "tools": false,
+        "options": {
+          "reasoning_effort": {
+            "supported": true,
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default": null,
+            "description": "Reasoning effort passed to claude --effort. Omit for the CLI default."
+          },
+          "web": {
+            "supported": true,
+            "values": [
+              false,
+              true
+            ],
+            "default": false,
+            "description": "Allow web search and page fetch tools (WebSearch, WebFetch)."
+          },
+          "access": {
+            "supported": true,
+            "values": [
+              "none",
+              "read-only",
+              "workspace-write"
+            ],
+            "default": "none",
+            "description": "none (default): no file tools. read-only: adds Read, Glob, Grep. workspace-write: also Edit and Write. These tools are not a sandbox: they accept absolute paths, so access does not confine the Turn to its workdir (docs/adr/0007)."
+          },
+          "workdir": {
+            "supported": true,
+            "values": null,
+            "default": null,
+            "description": "Absolute directory the Turn runs in. Must resolve inside WORKDIR_ROOTS. Omit for WORKDIR_DEFAULT."
+          }
+        },
+        "contextWindow": 200000
+      }
+    },
+    {
+      "id": "claude-sonnet",
+      "object": "model",
+      "owned_by": "claude",
+      "local_ai_wrapper": {
+        "backend": "claude",
+        "llm": "sonnet",
+        "streaming": true,
+        "tools": false,
+        "options": {
+          "reasoning_effort": {
+            "supported": true,
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default": null,
+            "description": "Reasoning effort passed to claude --effort. Omit for the CLI default."
+          },
+          "web": {
+            "supported": true,
+            "values": [
+              false,
+              true
+            ],
+            "default": false,
+            "description": "Allow web search and page fetch tools (WebSearch, WebFetch)."
+          },
+          "access": {
+            "supported": true,
+            "values": [
+              "none",
+              "read-only",
+              "workspace-write"
+            ],
+            "default": "none",
+            "description": "none (default): no file tools. read-only: adds Read, Glob, Grep. workspace-write: also Edit and Write. These tools are not a sandbox: they accept absolute paths, so access does not confine the Turn to its workdir (docs/adr/0007)."
+          },
+          "workdir": {
+            "supported": true,
+            "values": null,
+            "default": null,
+            "description": "Absolute directory the Turn runs in. Must resolve inside WORKDIR_ROOTS. Omit for WORKDIR_DEFAULT."
+          }
+        },
+        "contextWindow": 200000
+      }
+    },
+    {
+      "id": "claude-haiku",
+      "object": "model",
+      "owned_by": "claude",
+      "local_ai_wrapper": {
+        "backend": "claude",
+        "llm": "haiku",
+        "streaming": true,
+        "tools": false,
+        "options": {
+          "reasoning_effort": {
+            "supported": true,
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default": null,
+            "description": "Reasoning effort passed to claude --effort. Omit for the CLI default."
+          },
+          "web": {
+            "supported": true,
+            "values": [
+              false,
+              true
+            ],
+            "default": false,
+            "description": "Allow web search and page fetch tools (WebSearch, WebFetch)."
+          },
+          "access": {
+            "supported": true,
+            "values": [
+              "none",
+              "read-only",
+              "workspace-write"
+            ],
+            "default": "none",
+            "description": "none (default): no file tools. read-only: adds Read, Glob, Grep. workspace-write: also Edit and Write. These tools are not a sandbox: they accept absolute paths, so access does not confine the Turn to its workdir (docs/adr/0007)."
+          },
+          "workdir": {
+            "supported": true,
+            "values": null,
+            "default": null,
+            "description": "Absolute directory the Turn runs in. Must resolve inside WORKDIR_ROOTS. Omit for WORKDIR_DEFAULT."
+          }
+        },
+        "contextWindow": 200000
+      }
+    },
+    {
+      "id": "codex-sol",
+      "object": "model",
+      "owned_by": "codex",
+      "local_ai_wrapper": {
+        "backend": "codex",
+        "llm": "gpt-5.6-sol",
+        "streaming": false,
+        "tools": false,
+        "options": {
+          "reasoning_effort": {
+            "supported": true,
+            "values": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": null,
+            "description": "Reasoning effort passed as codex -c model_reasoning_effort. Omit for the CLI default."
+          },
+          "web": {
+            "supported": true,
+            "values": [
+              false,
+              true
+            ],
+            "default": false,
+            "description": "Enable live web search (codex -c web_search=live). Off by default."
+          },
+          "access": {
+            "supported": true,
+            "values": [
+              "read-only",
+              "workspace-write"
+            ],
+            "default": "read-only",
+            "description": "read-only (default): codex read-only sandbox, so no writes; codex read-only can still read outside workdir (only writes are confined). workspace-write: codex sandbox that confines writes to workdir."
+          },
+          "workdir": {
+            "supported": true,
+            "values": null,
+            "default": null,
+            "description": "Absolute directory the Turn runs in. Must resolve inside WORKDIR_ROOTS. Omit for WORKDIR_DEFAULT."
+          }
+        },
+        "contextWindow": 272000
+      }
+    },
+    {
+      "id": "codex-terra",
+      "object": "model",
+      "owned_by": "codex",
+      "local_ai_wrapper": {
+        "backend": "codex",
+        "llm": "gpt-5.6-terra",
+        "streaming": false,
+        "tools": false,
+        "options": {
+          "reasoning_effort": {
+            "supported": true,
+            "values": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": null,
+            "description": "Reasoning effort passed as codex -c model_reasoning_effort. Omit for the CLI default."
+          },
+          "web": {
+            "supported": true,
+            "values": [
+              false,
+              true
+            ],
+            "default": false,
+            "description": "Enable live web search (codex -c web_search=live). Off by default."
+          },
+          "access": {
+            "supported": true,
+            "values": [
+              "read-only",
+              "workspace-write"
+            ],
+            "default": "read-only",
+            "description": "read-only (default): codex read-only sandbox, so no writes; codex read-only can still read outside workdir (only writes are confined). workspace-write: codex sandbox that confines writes to workdir."
+          },
+          "workdir": {
+            "supported": true,
+            "values": null,
+            "default": null,
+            "description": "Absolute directory the Turn runs in. Must resolve inside WORKDIR_ROOTS. Omit for WORKDIR_DEFAULT."
+          }
+        },
+        "contextWindow": 272000
+      }
+    },
+    {
+      "id": "codex-luna",
+      "object": "model",
+      "owned_by": "codex",
+      "local_ai_wrapper": {
+        "backend": "codex",
+        "llm": "gpt-5.6-luna",
+        "streaming": false,
+        "tools": false,
+        "options": {
+          "reasoning_effort": {
+            "supported": true,
+            "values": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": null,
+            "description": "Reasoning effort passed as codex -c model_reasoning_effort. Omit for the CLI default."
+          },
+          "web": {
+            "supported": true,
+            "values": [
+              false,
+              true
+            ],
+            "default": false,
+            "description": "Enable live web search (codex -c web_search=live). Off by default."
+          },
+          "access": {
+            "supported": true,
+            "values": [
+              "read-only",
+              "workspace-write"
+            ],
+            "default": "read-only",
+            "description": "read-only (default): codex read-only sandbox, so no writes; codex read-only can still read outside workdir (only writes are confined). workspace-write: codex sandbox that confines writes to workdir."
+          },
+          "workdir": {
+            "supported": true,
+            "values": null,
+            "default": null,
+            "description": "Absolute directory the Turn runs in. Must resolve inside WORKDIR_ROOTS. Omit for WORKDIR_DEFAULT."
+          }
+        },
+        "contextWindow": 272000
+      }
+    }
+  ]
+}

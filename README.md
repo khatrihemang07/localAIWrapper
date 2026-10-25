@@ -1,16 +1,18 @@
 # localAIWrapper
 
-An OpenAI-compatible HTTP server that fronts local coding agents (`claude`, `codex`) so they look like plain chat models to any OpenAI-compatible client. Zero server-side state, tools disabled.
+An OpenAI-compatible HTTP server that fronts local coding agents (`claude`, `codex`) so they look like plain chat models to any OpenAI-compatible client. Each request spawns the agent's CLI and returns its answer; the server holds no state between requests.
 
-See `CONTEXT.md` for the project's vocabulary (Backend, Model, Transport, Turn) and `docs/adr/` for why the server works the way it does.
+See `CONTEXT.md` for the project's vocabulary (Backend, Model, Turn, Workdir, Access) and `docs/adr/` for why the server works the way it does.
 
 ## Installing
 
+Requires [Bun](https://bun.sh), and the `claude` and `codex` CLIs on `PATH`, logged in with your subscription.
+
 ```sh
-bun install
+bun run start
 ```
 
-Each Backend is reached through one of two Transports: `sdk`, the vendor's own library (`@anthropic-ai/claude-agent-sdk`, `@openai/codex-sdk`), or `cli`, spawning the `claude`/`codex` binary directly and parsing its output, as this project originally did. Preference is `sdk`, falling back to `cli` only when the vendor package isn't installed. `bun install` pulls in both SDKs, so it is now a required step — see docs/adr/0006 for what changed and why.
+There are no dependencies to install. Each Backend is reached by spawning its CLI (see docs/adr/0007).
 
 ## Starting the server
 
@@ -25,6 +27,18 @@ PORT=8080 bun run src/server.ts
 ```
 
 There is no authentication.
+
+### Configuration
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | `8080` | Port to listen on. |
+| `WORKDIR_DEFAULT` | `~/.local/share/localAIWrapper/workdir` | Directory every Turn runs in unless the request names another. Created at startup if it is the default and missing; if you set it, it must already exist. |
+| `WORKDIR_ROOTS` | (empty) | Comma-separated directories a request's `workdir` may resolve into. `WORKDIR_DEFAULT` is always included. Each entry must exist. |
+| `MAX_CONCURRENCY` | `4` | Most CLI processes running at once. Requests past this queue. |
+| `TURN_TIMEOUT_MS` | `600000` | Per-Turn budget, including queue wait. Exceeding it kills the process and returns a 504. |
+
+Each Turn runs in the default directory, not in the directory the server was started from. `WORKDIR_ROOTS` only limits which directory a request may name as its `workdir`. It does not sandbox the agent: a claude Turn with `read-only` or `workspace-write` can read and write files anywhere its user can, and a codex Turn can read anywhere (only codex writes are confined). The default `access` for claude is `none`, which removes its file tools.
 
 ## Pointing a client at it
 
@@ -41,16 +55,60 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 Add `"stream": true` to get an SSE stream of `chat.completion.chunk` frames instead of a single JSON response.
 
-Every request is serviced by a fresh Turn, on whichever Transport the Model resolved to — a freshly spawned CLI process, or a fresh call through the vendor SDK. Either way the server holds no state between requests, so the client's full `messages` array is sent on every call (see ADR-0001).
+Every request is serviced by a fresh Turn: a freshly spawned CLI process. The server holds no state between requests, so the client's full `messages` array is sent on every call (see ADR-0001).
 
-One exception: the codex SDK writes a session file per Turn to `~/.codex/sessions`, even though nothing is ever read back from it — a fresh thread is started on every Turn and `resumeThread()` is never called, so ADR-0001's statelessness still holds in practice. It's a disk-cost regression against the cli Transport, not a state leak (see docs/adr/0006).
+## Per-request options
 
-`GET /v1/models` lists every configured Model, and `GET /v1/models/{id}` returns that same object for one Model by name. Beyond the standard OpenAI fields, each object carries a `local_ai_wrapper` key with this server's own metadata (backend, underlying LLM, streaming behaviour, accepted options) — see ADR-0004 for why that lives in a namespaced key instead of at the top level, and why there is no Ollama-compatible discovery surface.
+Options are request fields. Each Model declares which it supports; see `local_ai_wrapper.options` on `GET /v1/models/{id}` for the exact values and defaults. Asking for an option the Model does not support, or a value outside its list, returns a 400.
+
+| Field | Values | Default | What it does |
+| --- | --- | --- | --- |
+| `reasoning_effort` | per Model (claude: `low`–`max`; codex: `minimal`–`high`) | backend default | Passed to the CLI as its reasoning-effort setting. |
+| `web` | `true` / `false` | `false` | Allows web search and page fetch. claude: `WebSearch`, `WebFetch`. codex: `web_search=live`. |
+| `access` | claude: `none` / `read-only` / `workspace-write`; codex: `read-only` / `workspace-write` | claude: `none`; codex: `read-only` | claude: `none` removes every file tool. `read-only`: claude gets `Read`, `Glob`, `Grep`; codex gets its read-only sandbox. `workspace-write`: claude also gets `Edit` and `Write`; codex may write inside its Workdir. codex has no `none`. **Not a sandbox for claude**: its file tools accept absolute paths, so `read-only` and `workspace-write` can reach files outside the Workdir. For codex, `read-only` can still read files outside the Workdir; only writes are confined (`workspace-write` confines writes). See docs/adr/0007. |
+| `workdir` | absolute path | `WORKDIR_DEFAULT` | Directory the Turn runs in. Must resolve (after `..` and symlinks) inside `WORKDIR_ROOTS`. |
+| `response_format` | `{"type":"json_schema","json_schema":{"name":"…","schema":{…}}}` | none | The answer's content is JSON matching the schema. `{"type":"text"}` is accepted as a no-op (no constraint). Any other `type` is a 400. |
+
+```sh
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "codex-luna",
+    "workdir": "/Users/me/scratch/project",
+    "access": "workspace-write",
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "answer",
+        "schema": {"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}
+      }
+    },
+    "messages": [{ "role": "user", "content": "Create notes.txt, then report ok." }]
+  }'
+```
+
+`tools`, `functions` and `tool_choice` are rejected with a 400. This server does not do tool calling.
+
+`GET /v1/models` lists every configured Model, and `GET /v1/models/{id}` returns that same object for one Model by name. Beyond the standard OpenAI fields, each object carries a `local_ai_wrapper` key with this server's own metadata: backend, underlying LLM, streaming behaviour, context window and the per-option declarations above. See ADR-0004 for why that lives in a namespaced key, and why there is no Ollama-compatible discovery surface.
 
 ## Adding a Model
 
-Models are declared in `models.json`, not in code. Each entry names a Backend (which coding agent it drives) plus that agent's invocation settings — the underlying LLM alias, and a raw `args` array of extra CLI-style flags appended verbatim to the invocation.
+Models are declared in `models.json`, not in code. Each entry names a Backend (which coding agent it drives), the underlying LLM alias, and an optional `systemPrompt` and `contextWindow`. Its options come from the Backend's shared declarations in `BACKEND_OPTION_DEFAULTS` (`src/config.ts`). A Model may override any one option by naming it in an `options` object. Each option declares, for `reasoning_effort`, `web`, `access` and `workdir`:
 
-An optional `"transport"` field pins a Model to `"cli"`, skipping the sdk Transport even when the vendor package is installed. This is required for a Model whose `args` can't be translated into SDK options — an unrecognised flag is a startup error, not a silent drop (see docs/adr/0006) — and otherwise useful for keeping a Model on the spawn path deliberately. Omitting `"transport"` means "prefer sdk, fall back to cli only if the vendor package won't import."
+- `supported` (boolean)
+- `values` (the allowed values, or `null` for free-form `workdir`)
+- `default` (what applies when the request omits the option, or `null`)
+- `description` (one line, shown on `/v1/models`)
 
-To add a Model, add an entry to `models.json`; no source change is required, and the new Model shows up in `GET /v1/models` immediately. To see what a Backend actually supports on either Transport, check the corresponding Backend file — nothing outside it should know that agent's flags, binary name, or SDK options.
+```json
+"claude-haiku": {
+  "backend": "claude",
+  "model": "haiku",
+  "systemPrompt": "You are a helpful assistant.",
+  "contextWindow": 200000
+}
+```
+
+There is no raw `args` escape hatch. Each Backend applies its own flags, so the harness strip, sandbox and billing setup cannot be overridden per Model (see docs/adr/0007).
+
+To add a Model, add an entry to `models.json`; no source change is required, and the new Model shows up in `GET /v1/models` immediately. The server refuses to start if a Model is malformed or names an unknown Backend.

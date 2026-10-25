@@ -1,24 +1,10 @@
-import { getModel, maxConcurrency, models, modelNames, turnTimeoutMs } from "./config.ts";
-import {
-  backendExists,
-  resolveBackend,
-  validateSdkArgs,
-  type Backend,
-  type TurnRun,
-  type Usage,
-} from "./backends/index.ts";
+import { getModel, maxConcurrency, models, modelNames, turnTimeoutMs, workdirDefault, workdirRoots } from "./config.ts";
+import { getBackend, type TurnRun } from "./backends/index.ts";
 import { AbortedWhileQueuedError, Semaphore } from "./concurrency.ts";
-import {
-  type ChatCompletionRequest,
-  type ChatCompletionResponse,
-  type ChatMessage,
-  type ReasoningEffort,
-  completionId,
-  errorResponse,
-  flattenMessages,
-  sseFrame,
-  SSE_DONE,
-} from "./openai.ts";
+import { type ChatCompletionRequest, type ChatMessage, checkMessages, errorResponse, flattenMessages } from "./openai.ts";
+import { bufferedResponse, type ResponseContext, streamResponse } from "./responses.ts";
+import { parseRequestOptions } from "./requestOptions.ts";
+import { resolveWorkdir } from "./workdir.ts";
 import { getOpenAIModel, listOpenAIModels } from "./discovery.ts";
 
 const port = Number(Bun.env.PORT) || 8080;
@@ -28,32 +14,12 @@ const port = Number(Bun.env.PORT) || 8080;
 // src/concurrency.ts and issue #5.
 const cliSlots = new Semaphore(maxConcurrency);
 
-// Why a Turn stopped waiting/running before completing normally. Used to
-// pick the right error message; `undefined` means it ran to its natural
-// conclusion (success or a backend-reported failure).
-type AbortReason = "client_disconnected" | "timeout";
 
-const REASONING_EFFORTS = new Set<ReasoningEffort>(["minimal", "low", "medium", "high", "xhigh", "max"]);
-
-// Resolve every Model's Transport at boot, not per-Turn. Two things must fail
-// loudly here rather than degrade quietly at request time: a Model naming a
-// Backend that doesn't exist, and a Model whose raw `args` can't be expressed
-// as SDK options (see the translation tables in the Backend files). The latter
-// matters most — silently dropping a stripping flag yields a Turn that still
-// looks like it worked while costing more and being less sandboxed.
+// A Model naming a Backend that doesn't exist must fail at boot, not at the
+// first request that asks for it.
 for (const [name, cfg] of Object.entries(models)) {
-  if (!backendExists(cfg.backend)) {
+  if (!getBackend(cfg.backend)) {
     throw new Error(`models.json: model "${name}" names unknown backend "${cfg.backend}"`);
-  }
-  const resolved = resolveBackend(cfg.backend, cfg.transport)!;
-  if (resolved.transport === "sdk") {
-    validateSdkArgs(cfg.backend, cfg);
-  }
-  if (resolved.fellBack) {
-    console.warn(
-      `[startup] model "${name}" asked for the sdk Transport, but the ${cfg.backend} SDK package ` +
-        `could not be imported — falling back to the cli Transport.`,
-    );
   }
 }
 
@@ -127,17 +93,18 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     return errorResponse('"messages" must be a non-empty array', 400);
   }
+  const messagesError = checkMessages(body.messages as ChatMessage[]);
+  if (messagesError) {
+    return errorResponse(messagesError, 400);
+  }
   // Tool calling is out of scope (see issue #5): reject loudly rather than
-  // silently stripping `tools`/`functions` — a client that expects
+  // silently stripping `tools`/`functions`/`tool_choice` — a client that expects
   // `tool_calls` back would otherwise hang forever waiting for them.
-  if (body.tools !== undefined || body.functions !== undefined) {
+  if (body.tools !== undefined || body.functions !== undefined || body.tool_choice !== undefined) {
     return errorResponse(
-      'This server does not support tool calling; requests containing "tools" or "functions" are rejected rather than silently ignored.',
+      'This server does not support tool calling; requests containing "tools", "functions" or "tool_choice" are rejected rather than silently ignored.',
       400,
     );
-  }
-  if (body.reasoning_effort !== undefined && !REASONING_EFFORTS.has(body.reasoning_effort)) {
-    return errorResponse(`"reasoning_effort" must be one of: ${[...REASONING_EFFORTS].join(", ")}`, 400);
   }
 
   const modelConfig = getModel(body.model);
@@ -149,16 +116,32 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     );
   }
 
-  const resolved = resolveBackend(modelConfig.backend, modelConfig.transport);
-  if (!resolved) {
+  const backend = getBackend(modelConfig.backend);
+  if (!backend) {
     return errorResponse(`Unknown backend "${modelConfig.backend}" for model "${body.model}"`, 500, "server_error");
   }
-  const backend = resolved.backend;
+
+  const parsed = parseRequestOptions(body as unknown as Record<string, unknown>, modelConfig.options);
+  if (!parsed.ok) {
+    return errorResponse(parsed.message, 400);
+  }
+  const options = parsed.value;
+
+  // Every Turn runs in a directory the server picked: the configured default,
+  // or a requested one that resolves inside WORKDIR_ROOTS.
+  let workdir = workdirDefault;
+  if (options.workdir !== undefined) {
+    const resolvedDir = resolveWorkdir(options.workdir, workdirRoots);
+    if (!resolvedDir.ok) {
+      return errorResponse(resolvedDir.message, 400);
+    }
+    workdir = resolvedDir.path;
+  }
 
   const { system, prompt } = flattenMessages(body.messages as ChatMessage[]);
   const effectiveModel = { ...modelConfig, systemPrompt: system ?? modelConfig.systemPrompt };
   const stream = body.stream === true;
-  log(`validated: model=${body.model} backend=${backend.label} stream=${stream}`);
+  log(`validated: model=${body.model} backend=${backend.label} stream=${stream} access=${options.access} web=${options.web} workdir=${workdir}`);
 
   // ---- Lifecycle: concurrency cap, timeout, client-disconnect cancellation.
   //
@@ -168,7 +151,9 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   // concurrency queue (Semaphore.acquire) and the child process listen to
   // it, so an abandoned or overlong Turn never keeps a queue slot or a
   // process alive.
-  let abortReason: AbortReason | undefined;
+  // Why a Turn stopped before completing normally: "client_disconnected" or
+  // "timeout". undefined means it ran to its natural conclusion.
+  let abortReason: "client_disconnected" | "timeout" | undefined;
   const turnAbort = new AbortController();
 
   const onClientAbort = () => {
@@ -226,15 +211,22 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     release?.();
   };
 
-  // The Backend owns its own execution from here: the cli Transport spawns
-  // and drains a process, the sdk Transport drives a vendor library. Both
-  // hand back the same TurnRun, and both listen to turnAbort — so an
-  // abandoned or overlong Turn is torn down without this function knowing
-  // which kind of thing it is tearing down.
+  // The Backend owns its own execution from here: it spawns its CLI and hands
+  // back a TurnRun that listens to turnAbort, so an abandoned or overlong Turn
+  // is torn down without this function knowing what process it is killing.
   let run: TurnRun;
   try {
     run = backend.run(
-      { model: effectiveModel, prompt, stream, reasoningEffort: body.reasoning_effort },
+      {
+        model: effectiveModel,
+        prompt,
+        stream,
+        reasoningEffort: options.reasoningEffort,
+        web: options.web,
+        access: options.access,
+        workdir,
+        responseFormat: options.responseFormat,
+      },
       turnAbort.signal,
     );
   } catch (err) {
@@ -248,254 +240,19 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   }
   log(`started ${backend.label}`);
 
+  const responseContext: ResponseContext = {
+    model: body.model,
+    timeoutMs: turnTimeoutMs,
+    getAbortReason: () => abortReason,
+    log,
+    requestStartedAt,
+  };
   if (stream) {
-    return streamResponse(run, backend, body.model, () => abortReason, settle, log, requestStartedAt);
+    return streamResponse(run, responseContext, settle);
   }
   try {
-    return await bufferedResponse(run, backend, body.model, () => abortReason, log, requestStartedAt);
+    return await bufferedResponse(run, responseContext);
   } finally {
     settle();
   }
-}
-
-// Appends a Backend's diagnostic context (a stderr tail from the cli
-// Transport; empty from the sdk Transport, which has none) to a message.
-function withDetail(message: string, detail: string): string {
-  return detail ? `${message} (stderr: ${detail})` : message;
-}
-
-function usageChunkPayload(usage: Usage) {
-  return {
-    prompt_tokens: usage.promptTokens ?? 0,
-    completion_tokens: usage.completionTokens ?? 0,
-    total_tokens: usage.totalTokens ?? 0,
-  };
-}
-
-async function bufferedResponse(
-  run: TurnRun,
-  backend: Backend,
-  model: string,
-  getAbortReason: () => AbortReason | undefined,
-  log: (msg: string) => void,
-  requestStartedAt: number,
-): Promise<Response> {
-  let text = "";
-  let usage: Usage | undefined;
-  let error: string | undefined;
-
-  for await (const decoded of run.events) {
-    if (typeof decoded.text === "string") text = decoded.text;
-    if (decoded.usage) usage = decoded.usage;
-    if (decoded.error) error = decoded.error;
-  }
-
-  const outcome = await run.finish();
-  const elapsedMs = Date.now() - requestStartedAt;
-
-  if (getAbortReason() === "timeout") {
-    log(`timed out after ${elapsedMs}ms, turn terminated`);
-    return errorResponse(
-      `Turn exceeded the configured timeout (${turnTimeoutMs}ms) and was terminated`,
-      504,
-      "timeout_error",
-    );
-  }
-
-  if (error) {
-    log(`backend reported an error after ${elapsedMs}ms: ${error}`);
-    return errorResponse(withDetail(error, outcome.detail), 502, "backend_error");
-  }
-  if (outcome.failure) {
-    log(`${outcome.failure} after ${elapsedMs}ms`);
-    return errorResponse(outcome.detail || outcome.failure, 502, "backend_error");
-  }
-
-  log(`completed in ${elapsedMs}ms`);
-  const response: ChatCompletionResponse = {
-    id: completionId(),
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model,
-    choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
-  };
-  if (usage) {
-    response.usage = usageChunkPayload(usage);
-  }
-  return Response.json(response);
-}
-
-function streamResponse(
-  run: TurnRun,
-  backend: Backend,
-  model: string,
-  getAbortReason: () => AbortReason | undefined,
-  onSettled: () => void,
-  log: (msg: string) => void,
-  requestStartedAt: number,
-): Response {
-  const id = completionId();
-  const created = Math.floor(Date.now() / 1000);
-  const encoder = new TextEncoder();
-
-  // Set by the ReadableStream's cancel() hook, which Bun invokes when the
-  // client disconnects mid-stream (verified live — see test.sh's
-  // "mid-stream disconnect" check). Once set, further controller
-  // enqueue/close calls are skipped: the underlying controller may already
-  // be torn down, and there is no one left to read the bytes anyway.
-  let cancelled = false;
-
-  // Deduplicates onSettled() between the normal completion path (the
-  // `finally` below) and cancel(), which can both fire.
-  let settledOnce = false;
-  const settle = () => {
-    if (settledOnce) return;
-    settledOnce = true;
-    onSettled();
-  };
-
-  const body = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let sentRole = false;
-      let sawError: string | undefined;
-      let usage: Usage | undefined;
-
-      const safeEnqueue = (chunk: string) => {
-        if (cancelled) return;
-        try {
-          controller.enqueue(encoder.encode(chunk));
-        } catch {
-          // Consumer tore the stream down concurrently; nothing to do.
-        }
-      };
-
-      try {
-        for await (const decoded of run.events) {
-          if (decoded.error) {
-            sawError = decoded.error;
-            if (decoded.usage) usage = decoded.usage;
-            break;
-          }
-          // Stop on the explicit terminal marker, never on "usage is
-          // present" — see the `final` doc comment on DecodedLine.
-          if (decoded.final) {
-            if (decoded.usage) usage = decoded.usage;
-            break;
-          }
-          if (decoded.text) {
-            const delta: { role?: "assistant"; content?: string } = { content: decoded.text };
-            if (!sentRole) {
-              delta.role = "assistant";
-              sentRole = true;
-            }
-            safeEnqueue(
-              sseFrame({
-                id,
-                object: "chat.completion.chunk",
-                created,
-                model,
-                choices: [{ index: 0, delta, finish_reason: null }],
-              }),
-            );
-          }
-        }
-
-        const outcome = await run.finish();
-        const elapsedMs = Date.now() - requestStartedAt;
-
-        const abortReason = getAbortReason();
-        if (!sawError && abortReason === "timeout") {
-          sawError = `Turn exceeded the configured timeout (${turnTimeoutMs}ms) and was terminated`;
-        } else if (!sawError && outcome.failure && abortReason !== "client_disconnected") {
-          sawError = withDetail(outcome.failure, outcome.detail);
-        }
-
-        if (cancelled) {
-          log(`client disconnected mid-stream after ${elapsedMs}ms`);
-          // Client already gone: nothing left to emit.
-          return;
-        }
-
-        log(sawError ? `stream ended with an error after ${elapsedMs}ms: ${sawError}` : `stream completed in ${elapsedMs}ms`);
-
-        // Always emit a real usage count ahead of the terminal chunk, as an
-        // extra chunk with empty `choices` (OpenAI's convention for
-        // `stream_options.include_usage`). We don't gate this on that
-        // option being set — honest usage being unconditionally available
-        // is more useful here than matching that opt-in exactly. See ADR
-        // 0003.
-        if (usage) {
-          safeEnqueue(
-            sseFrame({
-              id,
-              object: "chat.completion.chunk",
-              created,
-              model,
-              choices: [],
-              usage: usageChunkPayload(usage),
-            }),
-          );
-        }
-
-        if (sawError) {
-          // Best-effort: surface the error as a final content delta since
-          // the SSE stream has already started (headers are committed, so a
-          // proper error *response* is no longer possible).
-          safeEnqueue(
-            sseFrame({
-              id,
-              object: "chat.completion.chunk",
-              created,
-              model,
-              choices: [{ index: 0, delta: { content: `\n\n[error: ${sawError}]` }, finish_reason: "stop" }],
-            }),
-          );
-        } else {
-          safeEnqueue(
-            sseFrame({
-              id,
-              object: "chat.completion.chunk",
-              created,
-              model,
-              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            }),
-          );
-        }
-        safeEnqueue(SSE_DONE);
-        if (!cancelled) {
-          try {
-            controller.close();
-          } catch {
-            // already closed/cancelled concurrently
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          try {
-            controller.error(err);
-          } catch {
-            // already closed/cancelled concurrently
-          }
-        }
-      } finally {
-        settle();
-      }
-    },
-    cancel() {
-      // Fires when the client disconnects mid-stream. Kill immediately: an
-      // abandoned Turn must not keep burning tokens to completion, and the
-      // process must not become an orphan.
-      cancelled = true;
-      run.kill();
-      settle();
-    },
-  });
-
-  return new Response(body, {
-    headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-    },
-  });
 }

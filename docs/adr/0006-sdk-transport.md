@@ -1,5 +1,7 @@
 # The sdk Transport, preferred over cli
 
+> Superseded by [ADR-0007](0007-cli-only-transport.md): the sdk Transport is removed and the cli Transport is the only way a Backend is reached.
+
 Both `claude` and `codex` now ship a vendor library — `@anthropic-ai/claude-agent-sdk` and `@openai/codex-sdk` — that drives the same underlying binary on your behalf, handing back typed events instead of a line-oriented stdout to parse. Both SDKs still spawn a process — each bundles its own copy of the binary as a platform-specific npm package — so this is a change of interface, not of mechanism. Each Backend now offers two **Transports**: `sdk`, which imports the vendor library and reads typed events, and `cli`, which spawns the `claude`/`codex` binary and parses NDJSON off stdout, as this project has always done. Preference order is sdk, then cli, decided once per Model at startup.
 
 This forced the `Backend` interface to change shape. It used to be `{bin, streaming, buildArgs, decode}` — process-shaped, built around producing an argv and decoding a line. An SDK Turn has no argv, no stderr, and no exit code, so `Backend` is now `{label, streaming, run(req, signal) -> TurnRun}`: a Backend owns its own execution end to end. The spawn/stderr-drain/exit-code logic that used to live inline in `src/server.ts` moved out into `src/backends/cli.ts`, where it now serves both CLI Backends as shared plumbing rather than being special-cased per request.
