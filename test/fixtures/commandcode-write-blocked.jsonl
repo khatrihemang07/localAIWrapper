@@ -1,0 +1,58 @@
+{"type":"event","event":{"type":"run_start","sessionId":"8ee58e19-d34f-470a-9729-422d1249e3bb"}}
+{"type":"event","event":{"type":"turn_start","turnNumber":1}}
+{"type":"event","event":{"type":"message_start"}}
+{"type":"event","event":{"type":"model_request_start","model":"deepseek/deepseek-v4-flash"}}
+{"type":"event","event":{"type":"model_trace","traceId":"555d127fac6946bcc8cca9125092b488"}}
+{"type":"event","event":{"type":"text_delta","delta":"I"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"I"}]}}
+{"type":"event","event":{"type":"text_delta","delta":"'ll create the file"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"I'll create the file"}]}}
+{"type":"event","event":{"type":"text_delta","delta":"."}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"I'll create the file."}]}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"I'll create the file."},{"type":"tool_use","id":"call_00_mtcx7n6360e83cs9koevmm7r","name":"write_file","input":{"file_path":"/private/tmp/claude-501/-Users-mandalorian-Documents-Code-localAIWrapper/291e01a2-35c7-4a2c-bf8d-9eb47db41697/scratchpad/probe-empty/written.txt","content":"hi\n"}}]}}
+{"type":"event","event":{"type":"model_request_end","model":"deepseek/deepseek-v4-flash","usage":{"inputTokens":13938,"outputTokens":115,"cacheReadTokens":6144,"cacheWriteTokens":0},"stopReason":"tool_calls","effort":"off"}}
+{"type":"event","event":{"type":"message_end","content":[{"type":"text","text":"I'll create the file."},{"type":"tool_use","id":"call_00_mtcx7n6360e83cs9koevmm7r","name":"write_file","input":{"file_path":"/private/tmp/claude-501/-Users-mandalorian-Documents-Code-localAIWrapper/291e01a2-35c7-4a2c-bf8d-9eb47db41697/scratchpad/probe-empty/written.txt","content":"hi\n"}}]}}
+{"type":"event","event":{"type":"tool_queued","toolCallId":"call_00_mtcx7n6360e83cs9koevmm7r","toolName":"write_file","input":{"file_path":"/private/tmp/claude-501/-Users-mandalorian-Documents-Code-localAIWrapper/291e01a2-35c7-4a2c-bf8d-9eb47db41697/scratchpad/probe-empty/written.txt","content":"hi\n"}}}
+{"type":"event","event":{"type":"tool_hook_blocked","toolCallId":"call_00_mtcx7n6360e83cs9koevmm7r","toolName":"write_file","hookOutput":"Error: Tool \"write_file\" requires permissions. Use --yolo (or --dangerously-skip-permissions) to enable file writes and shell commands in print mode."}}
+{"type":"event","event":{"type":"turn_end","turnNumber":1,"hadToolCalls":true,"usage":{"inputTokens":13938,"outputTokens":115,"cacheReadTokens":6144,"cacheWriteTokens":0}}}
+{"type":"event","event":{"type":"turn_start","turnNumber":2}}
+{"type":"event","event":{"type":"message_start"}}
+{"type":"event","event":{"type":"model_request_start","model":"deepseek/deepseek-v4-flash"}}
+{"type":"event","event":{"type":"model_trace","traceId":"0afd182a7dc22cebde49cf168fa18ca9"}}
+{"type":"event","event":{"type":"text_delta","delta":"The"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The"}]}}
+{"type":"event","event":{"type":"text_delta","delta":" write was"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was"}]}}
+{"type":"event","event":{"type":"text_delta","delta":" blocked — this session"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session"}]}}
+{"type":"event","event":{"type":"text_delta","delta":" runs"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs"}]}}
+{"type":"event","event":{"type":"text_delta","delta":" in print mode without"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without"}]}}
+{"type":"event","event":{"type":"text_delta","delta":" file"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file"}]}}
+{"type":"event","event":{"type":"text_delta","delta":"-write permissions, so I"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I"}]}}
+{"type":"event","event":{"type":"text_delta","delta":" can't create `written.txt"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt"}]}}
+{"type":"event","event":{"type":"text_delta","delta":"` unless"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless"}]}}
+{"type":"event","event":{"type":"text_delta","delta":" it"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it"}]}}
+{"type":"event","event":{"type":"text_delta","delta":"'s launched"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched"}]}}
+{"type":"event","event":{"type":"text_delta","delta":" with `--yolo`"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo`"}]}}
+{"type":"event","event":{"type":"text_delta","delta":" (or `--dangerously"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo` (or `--dangerously"}]}}
+{"type":"event","event":{"type":"text_delta","delta":"-skip-permissions`"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo` (or `--dangerously-skip-permissions`"}]}}
+{"type":"event","event":{"type":"text_delta","delta":").\n\nNot D"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo` (or `--dangerously-skip-permissions`).\n\nNot D"}]}}
+{"type":"event","event":{"type":"text_delta","delta":"ONE."}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo` (or `--dangerously-skip-permissions`).\n\nNot DONE."}]}}
+{"type":"event","event":{"type":"model_request_end","model":"deepseek/deepseek-v4-flash","usage":{"inputTokens":14099,"outputTokens":52,"cacheReadTokens":13824,"cacheWriteTokens":0},"stopReason":"stop","effort":"off"}}
+{"type":"event","event":{"type":"message_end","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo` (or `--dangerously-skip-permissions`).\n\nNot DONE."}]}}
+{"type":"event","event":{"type":"turn_end","turnNumber":2,"hadToolCalls":false,"usage":{"inputTokens":14099,"outputTokens":52,"cacheReadTokens":13824,"cacheWriteTokens":0}}}
+{"type":"event","event":{"type":"run_end","result":{"finalText":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo` (or `--dangerously-skip-permissions`).\n\nNot DONE.","stopReason":"end_turn","turnCount":2,"usage":{"inputTokens":28037,"outputTokens":167,"cacheReadTokens":19968,"cacheWriteTokens":0},"systemPromptTokens":null,"nextState":{"sessionId":"8ee58e19-d34f-470a-9729-422d1249e3bb","messages":[{"role":"user","content":[{"type":"text","text":"Create a file named written.txt in the current directory containing the word hi, using your file tools. Then reply DONE."}],"meta":{"source":"user","createdAt":1792938975685,"messageId":"edd21d84-21e8-40ed-8a7b-50c3859b1a76"}},{"role":"assistant","content":[{"type":"text","text":"I'll create the file."},{"type":"tool_use","id":"call_00_mtcx7n6360e83cs9koevmm7r","name":"write_file","input":{"file_path":"/private/tmp/claude-501/-Users-mandalorian-Documents-Code-localAIWrapper/291e01a2-35c7-4a2c-bf8d-9eb47db41697/scratchpad/probe-empty/written.txt","content":"hi\n"}}],"meta":{"source":"model","createdAt":1792938978950,"messageId":"9532c868-6fe8-48da-bdd6-ae45fef0b842"}},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_00_mtcx7n6360e83cs9koevmm7r","content":[{"type":"text","text":"Error: Tool \"write_file\" requires permissions. Use --yolo (or --dangerously-skip-permissions) to enable file writes and shell commands in print mode."}]}],"meta":{"source":"tool","messageId":"646fb64f-7444-4ce3-808c-2ca808c1a09a"}},{"role":"assistant","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo` (or `--dangerously-skip-permissions`).\n\nNot DONE."}],"meta":{"source":"model","createdAt":1792938981432,"messageId":"111283e0-c805-431a-8adc-c3701bd09d82"}}],"interrupted":false,"modState":{"workspace":{"cwd":"/private/tmp/claude-501/-Users-mandalorian-Documents-Code-localAIWrapper/291e01a2-35c7-4a2c-bf8d-9eb47db41697/scratchpad/probe-empty","platform":"darwin","branch":null,"gitStatus":null,"recentCommits":[],"additionalDirectories":[]},"compaction":{"tokens":14157,"basis":{"role":"assistant","content":[{"type":"text","text":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo` (or `--dangerously-skip-permissions`).\n\nNot DONE."}],"meta":{"source":"model","createdAt":1792938981432,"messageId":"111283e0-c805-431a-8adc-c3701bd09d82"}}}}}}}}
+{"type":"result","subtype":"success","sessionId":"8ee58e19-d34f-470a-9729-422d1249e3bb","stopReason":"end_turn","usage":{"inputTokens":28037,"outputTokens":167,"cacheReadTokens":19968,"cacheWriteTokens":0},"durationMs":5813,"finalText":"The write was blocked — this session runs in print mode without file-write permissions, so I can't create `written.txt` unless it's launched with `--yolo` (or `--dangerously-skip-permissions`).\n\nNot DONE."}

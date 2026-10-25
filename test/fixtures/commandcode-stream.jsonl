@@ -1,0 +1,12 @@
+{"type":"event","event":{"type":"run_start","sessionId":"19fab9b2-ae2e-4fdd-b459-ff12c701c4a2"}}
+{"type":"event","event":{"type":"turn_start","turnNumber":1}}
+{"type":"event","event":{"type":"message_start"}}
+{"type":"event","event":{"type":"model_request_start","model":"deepseek/deepseek-v4-flash"}}
+{"type":"event","event":{"type":"model_trace","traceId":"1752b5a5c7157cbfbbeec0a82b5e8295"}}
+{"type":"event","event":{"type":"text_delta","delta":"PONG"}}
+{"type":"event","event":{"type":"message_update","content":[{"type":"text","text":"PONG"}]}}
+{"type":"event","event":{"type":"model_request_end","model":"deepseek/deepseek-v4-flash","usage":{"inputTokens":13948,"outputTokens":3,"cacheReadTokens":4096,"cacheWriteTokens":0},"stopReason":"stop"}}
+{"type":"event","event":{"type":"message_end","content":[{"type":"text","text":"PONG"}]}}
+{"type":"event","event":{"type":"turn_end","turnNumber":1,"hadToolCalls":false,"usage":{"inputTokens":13948,"outputTokens":3,"cacheReadTokens":4096,"cacheWriteTokens":0}}}
+{"type":"event","event":{"type":"run_end","result":{"finalText":"PONG","stopReason":"end_turn","turnCount":1,"usage":{"inputTokens":13948,"outputTokens":3,"cacheReadTokens":4096,"cacheWriteTokens":0},"systemPromptTokens":null,"nextState":{"sessionId":"19fab9b2-ae2e-4fdd-b459-ff12c701c4a2","messages":[{"role":"user","content":[{"type":"text","text":"Reply with exactly the word PONG."}],"meta":{"source":"user","createdAt":1792938911198,"messageId":"23c4ea00-abdf-4e1b-8535-6d240f372c98"}},{"role":"assistant","content":[{"type":"text","text":"PONG"}],"meta":{"source":"model","createdAt":1792938914450,"messageId":"fecc302f-337a-4b4f-8580-0939e5243919"}}],"interrupted":false,"modState":{"workspace":{"cwd":"/private/tmp/claude-501/-Users-mandalorian-Documents-Code-localAIWrapper/291e01a2-35c7-4a2c-bf8d-9eb47db41697/scratchpad/probe-empty","platform":"darwin","branch":null,"gitStatus":null,"recentCommits":[],"additionalDirectories":[]},"compaction":{"tokens":13956,"basis":{"role":"assistant","content":[{"type":"text","text":"PONG"}],"meta":{"source":"model","createdAt":1792938914450,"messageId":"fecc302f-337a-4b4f-8580-0939e5243919"}}}}}}}}
+{"type":"result","subtype":"success","sessionId":"19fab9b2-ae2e-4fdd-b459-ff12c701c4a2","stopReason":"end_turn","usage":{"inputTokens":13948,"outputTokens":3,"cacheReadTokens":4096,"cacheWriteTokens":0},"durationMs":3307,"finalText":"PONG"}

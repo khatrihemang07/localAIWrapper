@@ -1,1 +1,4 @@
 node_modules/
+graphify-out/
+.serena/
+.commandcode/

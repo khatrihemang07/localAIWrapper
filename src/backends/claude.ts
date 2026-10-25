@@ -1,14 +1,7 @@
 // The only file in this project that knows the `claude` binary exists, what
-// flags it takes, or that @anthropic-ai/claude-agent-sdk exists.
+// flags it takes, or which environment variables it reads for billing.
 //
-// Two Transports, one decoder. The SDK spawns its own bundled `claude` binary
-// and yields the same event objects the CLI prints as NDJSON — verified live:
-// `stream_event`/`content_block_delta` for text, and a terminal `result`
-// carrying `subtype`, `is_error`, `terminal_reason`, `result` and `usage`
-// under identical field names. So decodeEvent() below serves both, and the
-// two Transports can't silently drift in how they read an answer.
-//
-// Verified CLI behaviour (measured by live probing, see issue #1):
+// Verified CLI behaviour (live probing, see issue #1 and docs/adr/0007):
 // - `--output-format stream-json` requires `--verbose` when used with `-p`.
 // - `--include-partial-messages` is required to get incremental
 //   `content_block_delta` events; without it stdout only carries the whole
@@ -17,43 +10,82 @@
 //     {"type":"stream_event","event":{"type":"content_block_delta","delta":{"text":"…"}}}
 // - The final line is:
 //     {"type":"result","subtype":"success","result":"…","usage":{…}}
-//
-// Verified SDK behaviour (measured live, see docs/adr/0006):
-// - Authenticates against an existing claude.ai OAuth login with no API key;
-//   the `system`/`init` message reports `apiKeySource: "none"` when it does.
-// - `settingSources: []`, `allowedTools: []` and `mcpServers: {}` reproduce
-//   the ADR-0002 harness strip, measuring ~12.6k prompt tokens against the
-//   CLI strip's ~13.8k.
-// - The partial stream interleaves `thinking_delta` events, whose payload is
-//   `delta.thinking` rather than `delta.text`. decodeEvent() ignores them
-//   because it reads `delta.text` — deliberately, not incidentally.
+//   With `--json-schema`, `result` carries the schema-conforming JSON as text
+//   and `structured_output` carries the same answer as an object; the decoder
+//   prefers `structured_output` (fixture: test/fixtures/claude-structured-final-line.jsonl).
+// - A new assistant message starts with a `message_start` stream event; after a
+//   tool_use block its text is separated from the text before the tool call
+//   (see createClaudeLineDecoder).
+// - The prompt is read from stdin (`-p` with no positional argument).
+// - `--tools ""` removes the built-in tool definitions from the prompt
+//   entirely (measured: 23 definitions / ~9.4k prompt tokens without it,
+//   0 / ~0.6k with it). `--allowed-tools ""` only blocks tool use; the
+//   definitions still count. See docs/adr/0007.
+// - The Sphinx-style harness flags `--safe-mode`, `--no-session-persistence`
+//   and `--no-chrome` do not disturb subscription login (apiKeySource "none").
 
-import type { ModelConfig } from "../config.ts";
-import type { Backend, DecodedLine, TurnRequest, TurnRun, Usage } from "./index.ts";
-import { jsonLineDecoder, runCli } from "./cli.ts";
-import { pairArgs, runSdkTurn } from "./sdk.ts";
+import type { Backend, DecodedLine, TurnRequest, TurnRun } from "./index.ts";
+import { jsonLineDecoder, runCli, toUsage } from "./cli.ts";
 
 const BIN = "claude";
 
-// ---- shared decoding -------------------------------------------------------
+/** Credentials that would make `claude` bill API usage instead of the plan. */
+const API_KEY_VARS = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+];
 
-function decodeEvent(obj: any): DecodedLine | null {
-  if (obj?.type === "stream_event" && obj.event?.type === "content_block_delta") {
-    // `delta.text` is present on text_delta only. thinking_delta carries
-    // `delta.thinking` instead and is intentionally dropped here: reasoning is
-    // not part of the assistant's answer on this server's wire protocol.
-    const text = obj.event.delta?.text;
-    return typeof text === "string" ? { text } : null;
+// ---- decoding --------------------------------------------------------------
+
+/**
+ * What the decoder remembers across one Turn's lines. A Turn with tools is
+ * several assistant messages: text before a tool call and text after it arrive
+ * as separate messages, and would otherwise run together.
+ */
+type StreamState = {
+  /** A tool_use block has started since the last message_start. */
+  toolUsed: boolean;
+  /** Some text has already been streamed in this Turn. */
+  emittedText: boolean;
+  /** The next text delta opens a new message after a tool call: prefix it. */
+  separatorDue: boolean;
+};
+
+function decodeEvent(obj: any, state: StreamState): DecodedLine | null {
+  if (obj?.type === "stream_event") {
+    const event = obj.event;
+    if (event?.type === "message_start") {
+      if (state.toolUsed && state.emittedText) state.separatorDue = true;
+      state.toolUsed = false;
+      return null;
+    }
+    if (event?.type === "content_block_start" && event.content_block?.type === "tool_use") {
+      state.toolUsed = true;
+      return null;
+    }
+    if (event?.type === "content_block_delta") {
+      // `delta.text` is present on text_delta only. thinking_delta carries
+      // `delta.thinking` instead and is intentionally dropped here: reasoning is
+      // not part of the assistant's answer on this server's wire protocol.
+      const text = event.delta?.text;
+      if (typeof text !== "string") return null;
+      let out = text;
+      if (state.separatorDue) {
+        out = `\n\n${text}`;
+        state.separatorDue = false;
+      }
+      state.emittedText = true;
+      return { text: out };
+    }
+    return null;
   }
 
   if (obj?.type === "result") {
-    const usage: Usage | undefined = obj.usage
-      ? {
-          promptTokens: obj.usage.input_tokens,
-          completionTokens: obj.usage.output_tokens,
-          totalTokens: (obj.usage.input_tokens ?? 0) + (obj.usage.output_tokens ?? 0),
-        }
-      : undefined;
+    const usage = toUsage(obj.usage);
 
     // `is_error` and `terminal_reason` are the reliable failure signals:
     // `subtype` has been observed to still read "success" on API-level
@@ -63,18 +95,18 @@ function decodeEvent(obj: any): DecodedLine | null {
     //    "subtype":"success", "result":"Not logged in · Please run /login"}
     // Trusting `subtype` there would relay the login error to the client as
     // the model's own answer — a silent, plausible-looking wrong result.
-    // `is_error` alone has been sufficient on every payload observed so far
-    // ("completed" is the terminal_reason on success). `terminal_reason` is
-    // checked as a second signal, but only against reasons known to mean
-    // failure — treating every unrecognised value as an error would turn a
-    // future success state into a spurious 502.
     const failedTerminally = obj.terminal_reason === "api_error";
     if (obj.subtype === "success" && obj.is_error !== true && !failedTerminally) {
-      return {
-        text: typeof obj.result === "string" ? obj.result : undefined,
-        usage,
-        final: true,
-      };
+      // With --json-schema the schema-conforming answer is in structured_output
+      // (an object); `result` carries the same JSON as text. Prefer the object.
+      const structured = obj.structured_output;
+      const text =
+        structured !== undefined && structured !== null
+          ? JSON.stringify(structured)
+          : typeof obj.result === "string"
+            ? obj.result
+            : undefined;
+      return { text, usage, final: true };
     }
 
     return {
@@ -87,174 +119,80 @@ function decodeEvent(obj: any): DecodedLine | null {
   return null;
 }
 
-const decodeLine = jsonLineDecoder(decodeEvent);
+/** A line decoder for one Turn: its stream state is not shared across Turns. */
+export function createClaudeLineDecoder(): (line: string) => DecodedLine | null {
+  const state: StreamState = { toolUsed: false, emittedText: false, separatorDue: false };
+  return jsonLineDecoder((obj) => decodeEvent(obj, state));
+}
 
-// ---- cli Transport ---------------------------------------------------------
+// ---- invocation ------------------------------------------------------------
 
-function buildArgs(model: ModelConfig, prompt: string, stream: boolean, reasoningEffort?: string): string[] {
-  // The prompt must be given as the leading positional argument. Several of
-  // claude's flags (e.g. --allowed-tools, --mcp-config) are variadic and
-  // greedily swallow whatever comes right after them; a prompt placed after
-  // those flags gets absorbed as one of their values instead of being read
-  // as the prompt, and the CLI then errors with "Input must be provided
-  // either through stdin or as a prompt argument". Putting the prompt first
-  // avoids that entirely.
-  const args: string[] = [prompt, "-p", "--model", model.model];
+/**
+ * The tool set a Turn gets, as `--tools` names. `none` (the default) offers no
+ * file tools; an empty list means no built-in tools at all, which is the plain
+ * chat case. Each name's definition costs prompt tokens, so nothing is offered
+ * that the request did not ask for.
+ *
+ * These tools are NOT a sandbox: Read/Edit/Write accept absolute paths, so
+ * read-only and workspace-write do not confine the Turn to its workdir. See
+ * docs/adr/0007.
+ */
+export function toolsFor(access: TurnRequest["access"], web: boolean): string[] {
+  const tools: string[] = [];
+  if (access === "read-only" || access === "workspace-write") tools.push("Read", "Glob", "Grep");
+  if (access === "workspace-write") tools.push("Edit", "Write");
+  if (web) tools.push("WebSearch", "WebFetch");
+  return tools;
+}
 
-  if (model.systemPrompt) {
-    args.push("--system-prompt", model.systemPrompt);
+/**
+ * The argv for one Turn. The prompt is not here: it goes on stdin (`-p` reads
+ * it there when no positional is given). Value-taking flags whose value is
+ * free text use the `--flag=value` form, so a value starting with "-" is never
+ * read as a flag.
+ */
+export function buildClaudeArgs(req: TurnRequest, schemaJson?: string): string[] {
+  const args: string[] = ["-p", "--model", req.model.model];
+
+  // The harness strip (docs/adr/0002, superseded by 0007): no CLAUDE.md, no
+  // hooks, no MCP servers, no session file, no browser integration, and only
+  // the tools this request is allowed.
+  const tools = toolsFor(req.access, req.web);
+  args.push("--safe-mode", "--no-session-persistence", "--no-chrome");
+  args.push("--tools", tools.join(","));
+  args.push("--allowed-tools", tools.join(","));
+
+  if (req.model.systemPrompt) {
+    args.push(`--system-prompt=${req.model.systemPrompt}`);
+  }
+  if (req.reasoningEffort) {
+    args.push("--effort", req.reasoningEffort);
+  }
+  if (schemaJson !== undefined) {
+    args.push(`--json-schema=${schemaJson}`);
   }
 
-  // Per-request override from the chat-completions body (see
-  // docs/adr/0005-reasoning-effort-per-request.md); claude's own accepted
-  // values (low/medium/high/xhigh/max) are not validated here.
-  if (reasoningEffort) {
-    args.push("--effort", reasoningEffort);
-  }
-
-  // stream-json is used for both streaming and non-streaming turns so a
-  // single decoder can serve both: in the non-streaming case we simply never
-  // request partial messages, so the only line carrying text is the final
-  // "result" line.
+  // stream-json serves both streaming and non-streaming Turns through one
+  // decoder: a non-streaming Turn never requests partial messages, so the only
+  // line carrying text is the final `result` line.
   args.push("--output-format", "stream-json", "--verbose");
-  if (stream) {
+  if (req.stream) {
     args.push("--include-partial-messages");
   }
-
-  // The Model's raw, verbatim escape-hatch args (harness-stripping flags,
-  // etc.) — always appended, never interpreted here.
-  args.push(...model.args);
 
   return args;
 }
 
-export const claudeCliBackend: Backend = {
-  label: "claude (cli)",
+export const claudeBackend: Backend = {
+  label: "claude",
   streaming: true,
+  jsonSchema: true,
   run(req: TurnRequest, signal: AbortSignal): TurnRun {
-    const args = buildArgs(req.model, req.prompt, req.stream, req.reasoningEffort);
-    return runCli(BIN, args, decodeLine, signal);
+    const schemaJson = req.responseFormat ? JSON.stringify(req.responseFormat.schema) : undefined;
+    return runCli(BIN, buildClaudeArgs(req, schemaJson), createClaudeLineDecoder(), signal, {
+      cwd: req.workdir,
+      apiKeyVars: API_KEY_VARS,
+      stdin: req.prompt,
+    });
   },
 };
-
-// ---- sdk Transport ---------------------------------------------------------
-
-type SdkOptions = Record<string, unknown>;
-
-/**
- * models.json carries raw CLI flags, which the sdk Transport has no argv to
- * append them to. Each is translated to its typed SDK option instead.
- *
- * Anything not in this table is a hard error rather than a silent drop:
- * quietly ignoring `--allowed-tools ""` would re-enable roughly thirty tool
- * schemas and blow the ADR-0002 token budget with no error raised anywhere —
- * a Turn that still looks like it worked, but costs more and is no longer
- * sandboxed. A boot failure is strictly the milder outcome.
- */
-const CLAUDE_FLAG_TRANSLATIONS: Record<
-  string,
-  { takesValue: boolean; apply(options: SdkOptions, value: string | undefined): void }
-> = {
-  // Setting mcpServers explicitly is already the strict behaviour this flag
-  // asks the CLI for, so it needs no separate option.
-  "--strict-mcp-config": { takesValue: false, apply: () => {} },
-  "--mcp-config": {
-    takesValue: true,
-    apply(options, value) {
-      const parsed = JSON.parse(value ?? "{}");
-      options.mcpServers = parsed?.mcpServers ?? {};
-    },
-  },
-  "--setting-sources": {
-    takesValue: true,
-    apply(options, value) {
-      // `[]` is the SDK's documented isolation mode — the exact equivalent of
-      // passing an empty --setting-sources to the CLI.
-      options.settingSources = value ? value.split(",").filter(Boolean) : [];
-    },
-  },
-  // Slash commands are loaded from the filesystem settings sources, so an
-  // empty settingSources already means none are available.
-  "--disable-slash-commands": { takesValue: false, apply: () => {} },
-  "--allowed-tools": {
-    takesValue: true,
-    apply(options, value) {
-      options.allowedTools = value ? value.split(",").filter(Boolean) : [];
-    },
-  },
-  "--disallowed-tools": {
-    takesValue: true,
-    apply(options, value) {
-      options.disallowedTools = value ? value.split(",").filter(Boolean) : [];
-    },
-  },
-};
-
-function translateArgs(model: ModelConfig): SdkOptions {
-  const options: SdkOptions = {};
-  const pairs = pairArgs(model.args, (flag) => CLAUDE_FLAG_TRANSLATIONS[flag]?.takesValue === true);
-
-  for (const { flag, value } of pairs) {
-    const translation = CLAUDE_FLAG_TRANSLATIONS[flag];
-    if (!translation) {
-      throw new Error(
-        `claude Backend: cannot express "${flag}" as an SDK option. ` +
-          `Add a translation in src/backends/claude.ts, or pin this Model with "transport": "cli" in models.json. ` +
-          `Known flags: ${Object.keys(CLAUDE_FLAG_TRANSLATIONS).join(", ")}`,
-      );
-    }
-    if (translation.takesValue && value === undefined) {
-      throw new Error(`claude Backend: "${flag}" in models.json is missing its value`);
-    }
-    translation.apply(options, value);
-  }
-
-  return options;
-}
-
-export function validateClaudeSdkArgs(model: ModelConfig): void {
-  translateArgs(model);
-}
-
-// Import once at startup. A package that won't load is the *only* condition
-// that falls back to the cli Transport (see resolveBackend in ./index.ts).
-let sdk: { query: (args: any) => AsyncIterable<any> } | null = null;
-try {
-  sdk = (await import("@anthropic-ai/claude-agent-sdk")) as any;
-} catch {
-  sdk = null;
-}
-
-export const claudeSdkBackend: Backend | null = sdk
-  ? {
-      label: "claude (sdk)",
-      streaming: true,
-      run(req: TurnRequest, signal: AbortSignal): TurnRun {
-        const options: SdkOptions = {
-          model: req.model.model,
-          ...translateArgs(req.model),
-          includePartialMessages: req.stream,
-        };
-        if (req.model.systemPrompt) options.systemPrompt = req.model.systemPrompt;
-        if (req.reasoningEffort) options.effort = req.reasoningEffort;
-
-        return runSdkTurn(
-          BIN,
-          async function* (abortSignal) {
-            const abortController = new AbortController();
-            abortSignal.addEventListener("abort", () => abortController.abort());
-            if (abortSignal.aborted) abortController.abort();
-
-            for await (const message of sdk!.query({
-              prompt: req.prompt,
-              options: { ...options, abortController },
-            })) {
-              const decoded = decodeEvent(message);
-              if (decoded) yield decoded;
-            }
-          },
-          signal,
-        );
-      },
-    }
-  : null;
