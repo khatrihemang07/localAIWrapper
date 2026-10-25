@@ -13,6 +13,56 @@ your client  ──POST /v1/chat/completions──▶  localAIWrapper  ──spa
 
 Vocabulary (Backend, Model, Turn, Workdir, Access) is in `CONTEXT.md`. The reasoning behind the design is in `docs/adr/`.
 
+## In 60 seconds
+
+```sh
+git clone https://github.com/khatrihemang07/localAIWrapper && cd localAIWrapper
+bun run start                      # terminal 1: server on http://127.0.0.1:8080
+```
+
+```sh
+# terminal 2: ask a question
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-haiku","messages":[{"role":"user","content":"Say hello in five words."}]}'
+```
+```json
+{"id":"chatcmpl-cac67870-…","object":"chat.completion","created":1792940745,"model":"claude-haiku","choices":[{"index":0,"message":{"role":"assistant","content":"Hello there, friendly new visitor!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":15,"total_tokens":17}}
+```
+
+The answer is `choices[0].message.content`. To get just the text:
+
+```sh
+curl -s http://127.0.0.1:8080/v1/chat/completions -H "Content-Type: application/json" \
+  -d '{"model":"claude-haiku","messages":[{"role":"user","content":"Say hello in five words."}]}' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["choices"][0]["message"]["content"])'
+```
+
+The same request works for every Backend. Only the `model` changes:
+
+| Backend | `model` to send | Real answer from the same prompt |
+| --- | --- | --- |
+| claude | `claude-haiku` | `Hello there, friendly new visitor!` |
+| codex | `codex-luna` | `Hello there, have a great day!` |
+| commandcode | `commandcode/deepseek/deepseek-v4-flash` | `Hello there, how are you?` |
+
+Not sure what is available? `curl http://127.0.0.1:8080/v1/models` lists the claude and codex Models, and `curl "http://127.0.0.1:8080/v1/commandcode/models?q=spark"` searches the Command Code catalog by name.
+
+### Start command cheat sheet
+
+Every setting is an environment variable put in front of the same command. All are optional.
+
+| I want to… | Command |
+| --- | --- |
+| Start with defaults (port 8080) | `bun run start` |
+| Use another port | `PORT=9000 bun run start` |
+| Let requests read a folder (`access` + `workdir`) | `WORKDIR_ROOTS=$HOME/code/demo bun run start` |
+| Run more or fewer CLIs at once (default 4) | `MAX_CONCURRENCY=2 bun run start` |
+| Give slow requests more time (default 10 min) | `TURN_TIMEOUT_MS=1800000 bun run start` |
+| Everything at once | `PORT=9000 WORKDIR_ROOTS=$HOME/code/demo MAX_CONCURRENCY=2 TURN_TIMEOUT_MS=120000 bun run start` |
+
+Details for each variable are under [Configuration](#configuration).
+
 ## Contents
 
 1. [Quick start](#quick-start)
@@ -87,6 +137,39 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 The answer is at `choices[0].message.content`.
 
 **Using an OpenAI SDK or app:** set its base URL to `http://127.0.0.1:8080/v1`, use any non-empty API key (it is ignored), and set the model to one of the names under [Available models](#available-models-and-discovery). Wrapper-specific options (below) are extra body fields; in the OpenAI SDKs they go in `extra_body` (Python) or as extra properties on the request (JS).
+
+**From code, with no SDK** (both snippets were run against a live server):
+
+```python
+# Python 3, standard library only
+import json, urllib.request
+
+req = urllib.request.Request(
+    "http://127.0.0.1:8080/v1/chat/completions",
+    data=json.dumps({
+        "model": "claude-haiku",
+        "messages": [{"role": "user", "content": "Say hello in five words."}],
+    }).encode(),
+    headers={"Content-Type": "application/json"},
+)
+print(json.load(urllib.request.urlopen(req))["choices"][0]["message"]["content"])
+# Hello there, friendly person!
+```
+
+```ts
+// Bun or Node 18+
+const res = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    model: "claude-haiku",
+    messages: [{ role: "user", content: "Say hello in five words." }],
+  }),
+});
+const body = await res.json();
+console.log(body.choices[0].message.content);
+// Hello, how are you today?
+```
 
 ## Examples: input and output
 
@@ -251,7 +334,49 @@ Output:
 
 Which codex Models you can use depends on your ChatGPT plan; if one is rejected, the 502 error carries codex's message (see [Errors](#errors)). `usage` is whatever the CLI reports and is not comparable between Backends.
 
-### 7. Things that are rejected
+### 7. Using commandcode
+
+commandcode Models are looked up live, so the name is `commandcode/` plus a catalog id (or its short name). Find the exact name first:
+
+```sh
+curl "http://127.0.0.1:8080/v1/commandcode/models?q=deepseek-v4-flash"
+```
+```json
+{"object":"list","data":[
+  {"id":"commandcode/deepseek/deepseek-v4-flash","object":"model","owned_by":"commandcode",
+   "local_ai_wrapper":{"backend":"commandcode","short_name":"deepseek-v4-flash","efforts":["off","high","max"],"contextWindow":1000000,"default":true}},
+  {"id":"commandcode/deepseek/deepseek-v4-flash-vision-exp","object":"model","owned_by":"commandcode",
+   "local_ai_wrapper":{"backend":"commandcode","short_name":"deepseek-v4-flash-vision-exp","efforts":["off","high","max"],"contextWindow":1000000,"default":false}},
+  {"id":"commandcode/deepseek/deepseek-v4-flash-fast","object":"model","owned_by":"commandcode",
+   "local_ai_wrapper":{"backend":"commandcode","short_name":"deepseek-v4-flash-fast","efforts":["low","high","max"],"contextWindow":1000000,"default":false}}
+]}
+```
+(Output shortened: `created` fields removed.) Then chat with it, using the short name and a reasoning effort from its `efforts` list:
+
+Input:
+```json
+{
+  "model": "commandcode/deepseek-v4-flash",
+  "reasoning_effort": "high",
+  "messages": [{ "role": "user", "content": "What is 17*23? Answer with just the number." }]
+}
+```
+Output:
+```json
+{
+  "id": "chatcmpl-f01dbe52-b3bc-4953-af1c-2ab375c00eb8",
+  "object": "chat.completion",
+  "model": "commandcode/deepseek-v4-flash",
+  "choices": [
+    { "index": 0, "message": { "role": "assistant", "content": "391" }, "finish_reason": "stop" }
+  ],
+  "usage": { "prompt_tokens": 13875, "completion_tokens": 2, "total_tokens": 13877 }
+}
+```
+
+The large `prompt_tokens` is the CLI's own built-in prompt and tool definitions, which every Turn carries. Streaming (`"stream": true`) works the same as for claude. See [commandcode: live Models](#commandcode-live-models-from-the-clis-catalog) for the rules.
+
+### 8. Things that are rejected
 
 Tool calling:
 ```json
