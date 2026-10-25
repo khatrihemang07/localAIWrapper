@@ -1,14 +1,14 @@
 # localAIWrapper
 
-A small local server that takes a chat request (**x**), runs it through the `claude` or `codex` CLI on your machine, and returns the answer (**y**) in the standard OpenAI chat-completions format. Any OpenAI-compatible client can use it by changing its base URL.
+A small local server that takes a chat request (**x**), runs it through the `claude`, `codex` or `commandcode` CLI on your machine, and returns the answer (**y**) in the standard OpenAI chat-completions format. Any OpenAI-compatible client can use it by changing its base URL.
 
 ```
-your client  ──POST /v1/chat/completions──▶  localAIWrapper  ──spawns──▶  claude / codex CLI
+your client  ──POST /v1/chat/completions──▶  localAIWrapper  ──spawns──▶  claude / codex / commandcode CLI
              ◀──────── OpenAI-style JSON ───                 ◀── answer ──
 ```
 
 - One request = one fresh CLI process. The server keeps no state between requests.
-- It uses your logged-in `claude` / `codex` subscription, so no API key is needed.
+- It uses your logged-in `claude` / `codex` / `commandcode` subscription, so no API key is needed.
 - It is a wrapper, not an agent harness: it does not do tool calling. Your client (or harness) owns any tool loop.
 
 Vocabulary (Backend, Model, Turn, Workdir, Access) is in `CONTEXT.md`. The reasoning behind the design is in `docs/adr/`.
@@ -26,13 +26,14 @@ Vocabulary (Backend, Model, Turn, Workdir, Access) is in `CONTEXT.md`. The reaso
 
 ## Quick start
 
-**You need:** [Bun](https://bun.sh), plus the `claude` and/or `codex` CLIs on your `PATH`, already logged in. There are no packages to install.
+**You need:** [Bun](https://bun.sh), plus the `claude`, `codex` and/or `commandcode` CLIs on your `PATH`, already logged in. There are no packages to install.
 
 **1. Check the CLIs work on their own**
 
 ```sh
 claude --version
 codex --version
+commandcode --version
 ```
 
 **2. Start the server**
@@ -282,20 +283,20 @@ These are extra fields on the request body. Each Model declares which ones it su
 
 | Field | Values | Default | What it does |
 | --- | --- | --- | --- |
-| `reasoning_effort` | claude: `low`, `medium`, `high`, `xhigh`, `max`. codex: `minimal`, `low`, `medium`, `high`. | CLI default | Reasoning effort passed to the CLI. |
-| `web` | `true` / `false` | `false` | Allow web search and page fetch. |
-| `access` | claude: `none`, `read-only`, `workspace-write`. codex: `read-only`, `workspace-write`. | claude: `none`. codex: `read-only`. | What the agent may do with files. See the table below. |
+| `reasoning_effort` | claude: `low`, `medium`, `high`, `xhigh`, `max`. codex: `minimal`, `low`, `medium`, `high`. commandcode: per model, listed by discovery. | CLI default | Reasoning effort passed to the CLI. |
+| `web` | `true` / `false` | `false` | Allow web search and page fetch. Not available on commandcode. |
+| `access` | claude: `none`, `read-only`, `workspace-write`. codex: `read-only`, `workspace-write`. commandcode: `read-only`. | claude: `none`. codex and commandcode: `read-only`. | What the agent may do with files. See the table below. |
 | `workdir` | absolute path | `WORKDIR_DEFAULT` | Folder the Turn runs in. Must resolve (after `..` and symlinks) inside `WORKDIR_ROOTS`. |
-| `response_format` | `{"type":"json_schema","json_schema":{"name","schema"}}` or `{"type":"text"}` | none | JSON-Schema-constrained answer. |
+| `response_format` | `{"type":"json_schema","json_schema":{"name","schema"}}` or `{"type":"text"}` | none | JSON-Schema-constrained answer. Not available on commandcode. |
 | `stream` | `true` / `false` | `false` | Server-Sent Events instead of one JSON body. |
 
 What `access` means per Backend:
 
-| Value | claude | codex |
-| --- | --- | --- |
-| `none` | No file tools. Plain chat (about 0.6k prompt tokens). | not offered |
-| `read-only` | `Read`, `Glob`, `Grep` | read-only sandbox |
-| `workspace-write` | adds `Edit`, `Write` | may write inside the workdir |
+| Value | claude | codex | commandcode |
+| --- | --- | --- | --- |
+| `none` | No file tools. Plain chat (about 0.6k prompt tokens). | not offered | not offered |
+| `read-only` | `Read`, `Glob`, `Grep` | read-only sandbox | headless, so writes are blocked; reads are not confined to the workdir |
+| `workspace-write` | adds `Edit`, `Write` | may write inside the workdir | not offered (no confinement) |
 
 Other standard fields (`temperature`, `max_tokens`, …) are accepted and ignored. `tools`, `functions` and `tool_choice` are rejected.
 
@@ -322,7 +323,7 @@ TURN_TIMEOUT_MS=120000 \
 bun run start
 ```
 
-Each CLI runs with a cleaned environment: `GIT_*`, parent-agent session variables and API-key variables are removed so your subscription login is used and nothing leaks from the server's shell.
+Each CLI runs with a cleaned environment: `GIT_*`, parent-agent session variables and API-key variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `COMMAND_CODE_API_KEY`, ...) are removed so your subscription login is used and nothing leaks from the server's shell.
 
 ## Available models and discovery
 
@@ -371,22 +372,70 @@ curl http://127.0.0.1:8080/v1/models/claude-haiku
 
 `local_ai_wrapper.options` is the source of truth for what a client may send to that Model. (Output shortened; descriptions elided.)
 
+### commandcode: live Models from the CLI's catalog
+
+commandcode Models are not in `models.json`. The catalog changes often, so a commandcode Model is named `commandcode/<id>` and resolved on each request against the CLI's own catalog. Use the full catalog id, or its short name (the text after the last `/`), which the CLI also accepts:
+
+```json
+{ "model": "commandcode/deepseek/deepseek-v4-flash", "messages": [{ "role": "user", "content": "hi" }] }
+{ "model": "commandcode/deepseek-v4-flash", "messages": [{ "role": "user", "content": "hi" }] }
+```
+
+Matching ignores case. A short name shared by two ids is a 400 that lists both full ids. Use the listing to see what is available:
+
+```sh
+curl "http://127.0.0.1:8080/v1/commandcode/models?q=flash"
+```
+
+The listing is OpenAI-style. `?q=` keeps only ids that contain the text (case-insensitive):
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "commandcode/deepseek/deepseek-v4-flash",
+      "object": "model",
+      "created": 1792939233,
+      "owned_by": "commandcode",
+      "local_ai_wrapper": {
+        "backend": "commandcode",
+        "short_name": "deepseek-v4-flash",
+        "efforts": ["off", "high", "max"],
+        "contextWindow": 1000000,
+        "default": true
+      }
+    }
+  ]
+}
+```
+
+`efforts` lists what `reasoning_effort` accepts for that model. A model with no efforts refuses `reasoning_effort`. When the CLI's catalog cache is missing, `efforts` and `contextWindow` are omitted, and `reasoning_effort` is refused for every model.
+
+Caveats specific to commandcode:
+- Access is `read-only` only. Headless runs never get `--yolo`, which is the only switch that allows writes, so writes are blocked.
+- `web` and `response_format` are not available. The CLI's web search cannot be turned off.
+- Each Turn carries the CLI's default system prompt and tool definitions: about 12.7k to 14k input tokens for a one-word prompt in the probes behind docs/adr/0008.
+- Models that the CLI refuses (hidden, or outside your plan) return the CLI's error as a 502.
+
+See `docs/adr/0008-commandcode-live-passthrough.md`.
+
 ## Errors
 
 Errors use the OpenAI envelope: `{"error": {"message": "…", "type": "…", "code": null}}`.
 
 | Status | When |
 | --- | --- |
-| 400 | Invalid JSON, missing `model` or `messages`, no user/assistant message, `tools`/`functions`/`tool_choice`, an unsupported option or value, bad `workdir`, bad `response_format`. |
-| 404 | Unknown model name (the message lists valid ones) or unknown route. |
-| 502 | The CLI could not start, or exited non-zero. The message includes the CLI's own error text. |
+| 400 | Invalid JSON, missing `model` or `messages`, no user/assistant message, `tools`/`functions`/`tool_choice`, an unsupported option or value, bad `workdir`, bad `response_format`, a commandcode short name shared by two ids (the message lists both). |
+| 404 | Unknown model name (the message lists valid ones; a commandcode name gets code `model_not_found`) or unknown route. |
+| 502 | The CLI could not start, or exited non-zero. The message includes the CLI's own error text. Also when the commandcode catalog cannot be listed. |
 | 504 | The request exceeded `TURN_TIMEOUT_MS` (including time spent queued). |
 
 If the client disconnects, the CLI process is killed. For streaming requests, an error after the first chunk is sent as a final `[error: …]` content chunk followed by `[DONE]`, because headers are already sent.
 
 Troubleshooting:
-- **"Failed to start claude/codex"**: the CLI is not on the `PATH` of the shell that started the server.
-- **502 mentioning login**: run the CLI by itself (`claude`, `codex login status`) and sign in.
+- **"Failed to start claude/codex/commandcode"**: the CLI is not on the `PATH` of the shell that started the server.
+- **502 mentioning login**: run the CLI by itself (`claude`, `codex login status`, `commandcode status`) and sign in.
 - **Server will not start**: the message names the problem, such as a missing `WORKDIR_ROOTS` folder or a malformed `models.json` entry.
 
 ## Adding a Model
@@ -402,7 +451,7 @@ Models live in `models.json`, not in code. Add an entry and restart:
 }
 ```
 
-- `backend`: `claude` or `codex`.
+- `backend`: `claude` or `codex`. (commandcode Models are not declared here; see [commandcode](#commandcode-live-models-from-the-clis-catalog).)
 - `model`: the underlying LLM name the CLI understands.
 - `systemPrompt` (optional): default system prompt; a request's `system` message overrides it.
 - `contextWindow` (optional): reported on `/v1/models` so clients can size their context.
@@ -417,4 +466,4 @@ bun run test        # unit tests, then ./test.sh: a live suite that starts a ser
 bunx tsc --noEmit   # typecheck
 ```
 
-`./test.sh` makes real `claude` and `codex` calls, so it needs both CLIs signed in and takes a couple of minutes.
+`./test.sh` makes real `claude`, `codex` and `commandcode` calls, so it needs all three CLIs signed in and takes a few minutes.

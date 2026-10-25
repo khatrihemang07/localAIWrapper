@@ -108,3 +108,15 @@ test("a supported option with no values array fails the boot (workdir is the onl
 test("a supported workdir with null values is still valid", () => {
   expect(() => validateModels({ w: { backend: "claude", model: "haiku" } })).not.toThrow();
 });
+
+// ---- commandcode (docs/adr/0008) ----------------------------------------------
+
+test("commandcode is a known backend, so a models.json entry may name it", () => {
+  expect(() => validateModels({ c: { backend: "commandcode", model: "x" } })).not.toThrow();
+});
+
+test("a commandcode Model's access is read-only only, with read-only as the default", () => {
+  const cfg = validateModels({ c: { backend: "commandcode", model: "x" } });
+  expect(cfg.c.options.access.values).toEqual(["read-only"]);
+  expect(cfg.c.options.access.default).toBe("read-only");
+});

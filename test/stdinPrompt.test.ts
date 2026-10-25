@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { runCli } from "../src/backends/cli.ts";
 import { buildClaudeArgs } from "../src/backends/claude.ts";
 import { buildCodexArgs } from "../src/backends/codex.ts";
+import { buildCommandcodeArgs } from "../src/backends/commandcode.ts";
 import type { TurnRequest } from "../src/backends/index.ts";
 
 // The prompt reaches both CLIs on stdin, never as an argv token: argv is
@@ -53,4 +54,31 @@ test("codex reads its prompt from stdin via exec -, never as an argument", () =>
   expect(args[0]).toBe("exec");
   expect(args[1]).toBe("-");
   expect(args.some((a) => a.includes("SECRET-PROMPT-TEXT"))).toBe(false);
+});
+
+test("commandcode receives its prompt on stdin, never as an argument, and gets the fixed harness flags", () => {
+  const args = buildCommandcodeArgs(req({ model: { ...req().model, backend: "commandcode", model: "deepseek/deepseek-v4-flash" } }));
+  expect(args).toEqual([
+    "-p",
+    "--output-format",
+    "json",
+    "--no-session",
+    "--skip-onboarding",
+    "--no-skills",
+    "--safe-mode",
+    "-m",
+    "deepseek/deepseek-v4-flash",
+  ]);
+  expect(args.some((a) => a.includes("SECRET-PROMPT-TEXT"))).toBe(false);
+});
+
+test("commandcode gets --effort only when the request sets reasoning_effort, and never --yolo", () => {
+  const model = { ...req().model, backend: "commandcode", model: "deepseek/deepseek-v4-flash" };
+  expect(buildCommandcodeArgs(req({ model })).includes("--effort")).toBe(false);
+  const withEffort = buildCommandcodeArgs(req({ model, reasoningEffort: "high" }));
+  expect(withEffort.slice(-2)).toEqual(["--effort", "high"]);
+  for (const args of [buildCommandcodeArgs(req({ model })), withEffort]) {
+    expect(args).not.toContain("--yolo");
+    expect(args).not.toContain("--max-turns");
+  }
 });

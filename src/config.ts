@@ -1,6 +1,8 @@
 // Loads and validates models.json and the server's working-directory config.
 // Models are declared in config, not code: adding a fourth Model requires
-// editing models.json only.
+// editing models.json only. The exception is commandcode: its Models are
+// resolved live against the CLI's catalog (see src/backends/commandcode.ts and
+// docs/adr/0008), so they never appear in models.json.
 
 import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -135,6 +137,36 @@ const BACKEND_OPTION_DEFAULTS: Record<string, Partial<Record<OptionName, unknown
       "default": null,
       "description": "Absolute directory the Turn runs in. Must resolve inside WORKDIR_ROOTS. Omit for WORKDIR_DEFAULT."
     }
+  },
+  "commandcode": {
+    "reasoning_effort": {
+      "supported": false,
+      "values": null,
+      "default": null,
+      "description": "Reasoning effort passed as commandcode --effort. Only models whose catalog entry lists efforts accept it, and those efforts are per model (GET /v1/commandcode/models)."
+    },
+    "web": {
+      "supported": false,
+      "values": [
+        false
+      ],
+      "default": false,
+      "description": "Not supported: web_search and web_fetch cannot be disabled in the commandcode CLI (docs/adr/0008)."
+    },
+    "access": {
+      "supported": true,
+      "values": [
+        "read-only"
+      ],
+      "default": "read-only",
+      "description": "read-only, the only value: commandcode runs headless without --yolo, so file writes and shell commands are blocked. Its file reads are not confined to the workdir (docs/adr/0008)."
+    },
+    "workdir": {
+      "supported": true,
+      "values": null,
+      "default": null,
+      "description": "Absolute directory the Turn runs in. Must resolve inside WORKDIR_ROOTS. Omit for WORKDIR_DEFAULT."
+    }
   }
 };
 
@@ -176,6 +208,19 @@ function validateOption(modelName: string, name: OptionName, raw: unknown): Opti
     throw new Error(`${where} is unsupported, so its "default" must be ${JSON.stringify(NEUTRAL[name])}`);
   }
   return { supported: o.supported, values, default: def, description: o.description };
+}
+
+/**
+ * A Model's full option set: its Backend's shared declarations, with the
+ * options named in `own` replacing those. Throws on an invalid declaration.
+ */
+export function resolveModelOptions(modelName: string, backend: string, own: Record<string, unknown> = {}): ModelOptions {
+  const opts: Record<string, unknown> = { ...(BACKEND_OPTION_DEFAULTS[backend] ?? {}), ...own };
+  const options = {} as ModelOptions;
+  for (const option of OPTION_NAMES) {
+    options[option] = validateOption(modelName, option, opts[option]);
+  }
+  return options;
 }
 
 /** Validates raw models.json content. Exported so the boot checks can be tested. */
@@ -224,21 +269,12 @@ export function validateModels(raw: unknown): Record<string, ModelConfig> {
         }
       }
     }
-    const opts: Record<string, unknown> = {
-      ...(BACKEND_OPTION_DEFAULTS[v.backend] ?? {}),
-      ...((v.options ?? {}) as Record<string, unknown>),
-    };
-    const options = {} as ModelOptions;
-    for (const option of OPTION_NAMES) {
-      options[option] = validateOption(name, option, opts[option]);
-    }
-
     result[name] = {
       backend: v.backend,
       model: v.model,
       systemPrompt: v.systemPrompt as string | undefined,
       contextWindow: v.contextWindow as number | undefined,
-      options,
+      options: resolveModelOptions(name, v.backend, (v.options ?? {}) as Record<string, unknown>),
     };
   }
 

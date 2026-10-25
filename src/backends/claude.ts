@@ -186,6 +186,7 @@ export function buildClaudeArgs(req: TurnRequest, schemaJson?: string): string[]
 export const claudeBackend: Backend = {
   label: "claude",
   streaming: true,
+  jsonSchema: true,
   run(req: TurnRequest, signal: AbortSignal): TurnRun {
     const schemaJson = req.responseFormat ? JSON.stringify(req.responseFormat.schema) : undefined;
     return runCli(BIN, buildClaudeArgs(req, schemaJson), createClaudeLineDecoder(), signal, {

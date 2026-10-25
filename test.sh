@@ -188,6 +188,7 @@ section "Starting server"
 # fail; passing means the child environment is scrubbed (src/backends/cli.ts).
 WORKDIR_DEFAULT="$DEFAULT_DIR" WORKDIR_ROOTS="$ALLOWED_DIR" \
   ANTHROPIC_API_KEY="sk-ant-bogus-for-scrub-test" OPENAI_API_KEY="sk-bogus-for-scrub-test" \
+  COMMAND_CODE_API_KEY="cc-bogus-for-scrub-test" \
   PORT="$PORT" bun run src/server.ts >"$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 echo "server pid: $SERVER_PID, port: $PORT, log: $LOG_FILE"
@@ -757,6 +758,112 @@ if [[ $all_ok -eq 1 ]]; then
   pass "all 10 concurrent (queued) requests eventually succeeded"
 else
   fail "all queued requests succeeded" "one or more of the 10 requests did not return 200"
+fi
+
+# ---- commandcode: live pass-through Models (docs/adr/0008) --------------------
+#
+# Names are "commandcode/<catalog id or short name>", resolved against the CLI's
+# own catalog on each request. The checks below derive their expected values
+# from the CLI itself where they can, so they do not hardcode the catalog.
+
+section "commandcode discovery (GET /v1/commandcode/models)"
+
+f="$WORK_DIR/commandcode-list.json"
+code=$(curl -s -o "$f" -w '%{http_code}' "$BASE/v1/commandcode/models")
+listed=$(jsget "$f" 'd.data.length' 2>/dev/null || echo 0)
+# The CLI states its own count in its listing header.
+cli_count=$(commandcode --list-models 2>/dev/null | sed -n 's/^Available models *· *\([0-9][0-9]*\) models.*/\1/p')
+if [[ "$code" == "200" && "$listed" -gt 0 && "$listed" == "$cli_count" ]]; then
+  pass "GET /v1/commandcode/models lists every model the CLI lists ($listed)"
+else
+  fail "GET /v1/commandcode/models count" "code=$code listed=$listed cli=$cli_count"
+fi
+
+prefixed=$(jsget "$f" 'd.data.every(m=>m.id.startsWith("commandcode/") && m.owned_by==="commandcode")' 2>/dev/null || echo false)
+defaults=$(jsget "$f" 'd.data.filter(m=>m.local_ai_wrapper.default).map(m=>m.id).join(",")' 2>/dev/null || echo "")
+if [[ "$prefixed" == "true" && "$defaults" == "commandcode/deepseek/deepseek-v4-flash" ]]; then
+  pass "every row is commandcode/<id>, and the catalog default is the one row flagged default"
+else
+  fail "commandcode row shape" "prefixed=$prefixed defaults=$defaults"
+fi
+
+f="$WORK_DIR/commandcode-q.json"
+curl -s -o "$f" "$BASE/v1/commandcode/models?q=SPARK"
+spark_ok=$(jsget "$f" '(d.data.length>0 && d.data.every(m=>m.id.toLowerCase().includes("spark")))' 2>/dev/null || echo false)
+if [[ "$spark_ok" == "true" ]]; then
+  pass "?q=SPARK (case-insensitive) keeps only ids containing spark"
+else
+  fail "?q= filter" "spark_ok=$spark_ok body=$(head -c 300 "$f")"
+fi
+
+section "commandcode guards (refused before any CLI spawns)"
+
+f="$WORK_DIR/cc-access-write.json"
+code=$(post "$f" '{"model":"commandcode/deepseek-v4-flash","access":"workspace-write","messages":[{"role":"user","content":"hi"}]}')
+[[ "$code" == "400" && "$(cat "$f")" == *"must be one of: read-only"* ]] && pass 'commandcode access "workspace-write" -> 400 listing read-only' || fail 'commandcode access workspace-write' "code=$code body=$(cat "$f")"
+
+f="$WORK_DIR/cc-access-none.json"
+code=$(post "$f" '{"model":"commandcode/deepseek-v4-flash","access":"none","messages":[{"role":"user","content":"hi"}]}')
+[[ "$code" == "400" ]] && pass 'commandcode access "none" -> 400' || fail 'commandcode access none' "code=$code body=$(cat "$f")"
+
+f="$WORK_DIR/cc-web.json"
+code=$(post "$f" '{"model":"commandcode/deepseek-v4-flash","web":true,"messages":[{"role":"user","content":"hi"}]}')
+[[ "$code" == "400" ]] && pass "commandcode web:true -> 400" || fail "commandcode web:true" "code=$code body=$(cat "$f")"
+
+f="$WORK_DIR/cc-schema.json"
+code=$(post "$f" '{"model":"commandcode/deepseek-v4-flash","response_format":{"type":"json_schema","json_schema":{"name":"x","schema":{"type":"object"}}},"messages":[{"role":"user","content":"hi"}]}')
+[[ "$code" == "400" && "$(cat "$f")" == *response_format* ]] && pass "commandcode response_format json_schema -> 400" || fail "commandcode response_format" "code=$code body=$(cat "$f")"
+
+f="$WORK_DIR/cc-unknown.json"
+code=$(post "$f" '{"model":"commandcode/no-such-model","messages":[{"role":"user","content":"hi"}]}')
+[[ "$code" == "404" && "$(jsget "$f" 'd.error.code')" == "model_not_found" ]] && pass "unknown commandcode id -> 404 model_not_found" || fail "unknown commandcode id" "code=$code body=$(cat "$f")"
+
+f="$WORK_DIR/cc-effort-bad.json"
+code=$(post "$f" '{"model":"commandcode/deepseek-v4-flash","reasoning_effort":"xhigh","messages":[{"role":"user","content":"hi"}]}')
+[[ "$code" == "400" && "$(cat "$f")" == *"off, high, max"* ]] && pass 'commandcode reasoning_effort outside the catalog -> 400 listing the accepted values' || fail "commandcode reasoning_effort" "code=$code body=$(cat "$f")"
+
+section "commandcode real calls (deepseek-v4-flash)"
+
+f="$WORK_DIR/cc-nonstream.json"
+code=$(post "$f" '{"model":"commandcode/deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly one word: pong"}]}')
+content=$(jsget "$f" 'd.choices[0].message.content' 2>/dev/null || echo "")
+total=$(jsget "$f" 'd.usage.total_tokens' 2>/dev/null || echo 0)
+if [[ "$code" == "200" && -n "$content" && "$total" -gt 0 ]]; then
+  pass "non-streaming commandcode answers with usage (full id): \"$content\", total_tokens=$total"
+  pass "server env COMMAND_CODE_API_KEY (bogus) did not reach commandcode: the login answered"
+else
+  fail "non-streaming commandcode (full id)" "code=$code body=$(cat "$f")"
+  fail "server env COMMAND_CODE_API_KEY (bogus) did not reach commandcode" "call failed"
+fi
+
+f="$WORK_DIR/cc-short.json"
+code=$(post "$f" '{"model":"commandcode/deepseek-v4-flash","reasoning_effort":"high","messages":[{"role":"user","content":"Reply with exactly one word: pong"}]}')
+content=$(jsget "$f" 'd.choices[0].message.content' 2>/dev/null || echo "")
+if [[ "$code" == "200" && -n "$content" ]]; then
+  pass "short name with reasoning_effort high (passed as --effort) answers: \"$content\""
+else
+  fail "short name commandcode call" "code=$code body=$(cat "$f")"
+fi
+
+f="$WORK_DIR/stream-commandcode.sse"
+curl -s -N -X POST "$BASE/v1/chat/completions" -H 'content-type: application/json' \
+  -d '{"model":"commandcode/deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"Count from one to five, one number word per line."}],"stream":true}' \
+  -o "$f"
+read -r deltaChunks sawUsage usageTotal sawDone sawFinish <<<"$(sse_stats "$f")"
+if [[ "$deltaChunks" -gt 1 && "$sawUsage" == "1" && "$usageTotal" -gt 0 && "$sawDone" == "1" && "$sawFinish" == "1" ]]; then
+  pass "streaming commandcode delivers incremental deltas ($deltaChunks chunks) with usage ($usageTotal) and [DONE]"
+else
+  fail "streaming commandcode" "deltaChunks=$deltaChunks sawUsage=$sawUsage total=$usageTotal sawDone=$sawDone sawFinish=$sawFinish -- $(head -c 400 "$f")"
+fi
+
+# access is read-only only, so a write the model attempts is refused by the CLI.
+# The check is on the file system, not the answer: nothing may be created.
+rm -f "$DEFAULT_DIR/cc-written.txt"
+post "$WORK_DIR/cc-write.json" '{"model":"commandcode/deepseek-v4-flash","messages":[{"role":"user","content":"Create a file named cc-written.txt in the current directory containing the word hi, using your file tools."}]}' >/dev/null
+if [[ ! -e "$DEFAULT_DIR/cc-written.txt" ]]; then
+  pass "commandcode access is read-only: a write the model attempts is blocked (no file created)"
+else
+  fail "commandcode read-only" "cc-written.txt was created in the workdir"
 fi
 
 # ---- per-Model option refusals, error envelopes and timeouts ------------------

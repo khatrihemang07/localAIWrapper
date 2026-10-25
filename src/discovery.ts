@@ -6,6 +6,7 @@
 
 import { models, type ModelConfig } from "./config.ts";
 import { getBackend } from "./backends/index.ts";
+import { type CatalogEntry, MODEL_PREFIX } from "./backends/commandcode.ts";
 
 // Stamped once at process start; used as a stand-in "created" time since
 // Models have no real creation timestamp of their own.
@@ -73,4 +74,54 @@ export function getOpenAIModel(id: string): OpenAIModel | undefined {
   const cfg = models[id];
   if (!cfg) return undefined;
   return toOpenAIModel(id, cfg);
+}
+
+// ---- commandcode -----------------------------------------------------------
+//
+// GET /v1/commandcode/models. Its rows are the CLI's live catalog, so they are
+// not in listOpenAIModels: a commandcode Model is named `commandcode/<id>` and
+// resolved per request (see src/backends/commandcode.ts).
+
+export type CommandcodeModel = {
+  id: string;
+  object: "model";
+  created: number;
+  owned_by: "commandcode";
+  local_ai_wrapper: {
+    backend: "commandcode";
+    /** The text after the id's last "/", which the CLI also accepts. */
+    short_name: string;
+    /** Reasoning efforts the catalog lists. Omitted when no catalog metadata is available. */
+    efforts?: string[];
+    /** Omitted when the catalog says nothing. */
+    contextWindow?: number;
+    default: boolean;
+  };
+};
+
+/**
+ * The OpenAI-style list for a catalog, filtered by `q`: a case-insensitive
+ * substring of the id. A missing or empty `q` keeps every row.
+ */
+export function commandcodeModelList(
+  entries: CatalogEntry[],
+  q: string | null,
+): { object: "list"; data: CommandcodeModel[] } {
+  const needle = (q ?? "").toLowerCase();
+  const data = entries
+    .filter((e) => e.id.toLowerCase().includes(needle))
+    .map((e): CommandcodeModel => ({
+      id: `${MODEL_PREFIX}${e.id}`,
+      object: "model",
+      created: startedAt,
+      owned_by: "commandcode",
+      local_ai_wrapper: {
+        backend: "commandcode",
+        short_name: e.shortName,
+        ...(e.efforts !== undefined ? { efforts: e.efforts } : {}),
+        ...(e.contextWindow !== undefined ? { contextWindow: e.contextWindow } : {}),
+        default: e.isDefault,
+      },
+    }));
+  return { object: "list", data };
 }

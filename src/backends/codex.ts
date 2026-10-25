@@ -132,6 +132,7 @@ export const codexBackend: Backend = {
   // Measured: codex emits no token deltas, so the whole answer arrives as one
   // message and is relayed as one chunk.
   streaming: false,
+  jsonSchema: true,
   run(req: TurnRequest, signal: AbortSignal): TurnRun {
     // The schema goes to codex as a file. It is created per Turn and removed
     // once the process has finished — or straight away if it never started.

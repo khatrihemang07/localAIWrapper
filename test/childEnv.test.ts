@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { childEnvironment } from "../src/backends/cli.ts";
+import { API_KEY_VARS as COMMANDCODE_API_KEY_VARS } from "../src/backends/commandcode.ts";
 
 const CLAUDE_BILLING = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"];
 
@@ -76,4 +77,31 @@ test("strips every CLAUDE_CODE_* variable a parent session sets, except the subs
   expect(out.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth-for-plan");
   expect(out.CLAUDE_CONFIG_DIR).toBe("/cfg");
   expect(out.HOME).toBe("/h");
+});
+
+test("drops the commandcode API key so the login is used", () => {
+  const out = childEnvironment({ PATH: "/bin", COMMAND_CODE_API_KEY: "user_key" }, COMMANDCODE_API_KEY_VARS);
+  expect(out.COMMAND_CODE_API_KEY).toBeUndefined();
+  expect(out.PATH).toBe("/bin");
+});
+
+test("drops commandcode session and parent markers, but keeps the user's own CMD_ and COMMAND_CODE_ settings", () => {
+  const out = childEnvironment(
+    {
+      CMD_SESSION_ID: "s",
+      CMD_PARENT_SESSION: "p",
+      COMMAND_CODE_SESSION_ID: "s2",
+      COMMAND_CODE_PARENT_SESSION: "p2",
+      CMD_LOCAL_ONLY: "1",
+      CMD_ZDR: "1",
+      COMMAND_CODE_TELEMETRY_CONSOLE: "1",
+    },
+    [],
+  );
+  for (const k of ["CMD_SESSION_ID", "CMD_PARENT_SESSION", "COMMAND_CODE_SESSION_ID", "COMMAND_CODE_PARENT_SESSION"]) {
+    expect(out[k]).toBeUndefined();
+  }
+  expect(out.CMD_LOCAL_ONLY).toBe("1");
+  expect(out.CMD_ZDR).toBe("1");
+  expect(out.COMMAND_CODE_TELEMETRY_CONSOLE).toBe("1");
 });

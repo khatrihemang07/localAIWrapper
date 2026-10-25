@@ -109,8 +109,13 @@ export function completionId(): string {
   return `chatcmpl-${crypto.randomUUID()}`;
 }
 
-export function errorResponse(message: string, status: number, type = "invalid_request_error"): Response {
-  return new Response(JSON.stringify({ error: { message, type, code: null } }), {
+export function errorResponse(
+  message: string,
+  status: number,
+  type = "invalid_request_error",
+  code: string | null = null,
+): Response {
+  return new Response(JSON.stringify({ error: { message, type, code } }), {
     status,
     headers: { "content-type": "application/json" },
   });

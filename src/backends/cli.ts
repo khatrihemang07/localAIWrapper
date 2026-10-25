@@ -37,6 +37,11 @@ const PARENT_SESSION_PATTERNS: RegExp[] = [
   /^CLAUDE_(?:SESSION|PARENT)(?:_|$)/u,
   /^PI_(?:SESSION(?:_|$)|PROVIDER$|MODEL$)/u,
   /^SPHINX_(?:CLAUDE|CURSOR|OPENCODE)_SESSION$/u,
+  // commandcode's own variables are CMD_* and COMMAND_CODE_*, and many of them
+  // are user settings the CLI reads (CMD_LOCAL_ONLY, CMD_ZDR, ...), so only
+  // the session and parent markers are matched here.
+  /^CMD_(?:SESSION|PARENT)(?:_|$)/u,
+  /^COMMAND_CODE_(?:SESSION|PARENT)(?:_|$)/u,
 ];
 
 /**

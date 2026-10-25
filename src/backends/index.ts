@@ -9,6 +9,7 @@ import type { ModelConfig } from "../config.ts";
 import type { Access, JsonSchemaFormat } from "../requestOptions.ts";
 import { claudeBackend } from "./claude.ts";
 import { codexBackend } from "./codex.ts";
+import { commandcodeBackend } from "./commandcode.ts";
 
 export type Usage = {
   promptTokens?: number;
@@ -80,12 +81,19 @@ export type Backend = {
    * upfront.
    */
   streaming: boolean;
+  /**
+   * Whether this Backend can constrain its answer to a `response_format`
+   * JSON schema. A request that sends one to a Backend without it is a 400
+   * rather than a silently unconstrained answer.
+   */
+  jsonSchema: boolean;
   run(req: TurnRequest, signal: AbortSignal): TurnRun;
 };
 
 const BACKENDS: Record<string, Backend> = {
   claude: claudeBackend,
   codex: codexBackend,
+  commandcode: commandcodeBackend,
 };
 
 export function getBackend(name: string): Backend | undefined {

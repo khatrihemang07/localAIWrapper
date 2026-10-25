@@ -1,15 +1,16 @@
-import { getModel, maxConcurrency, models, modelNames, turnTimeoutMs, workdirDefault, workdirRoots } from "./config.ts";
+import { getModel, maxConcurrency, models, modelNames, type ModelConfig, turnTimeoutMs, workdirDefault, workdirRoots } from "./config.ts";
 import { getBackend, type TurnRun } from "./backends/index.ts";
+import { discoverCommandcodeModels, MODEL_PREFIX, resolveCommandcodeModel } from "./backends/commandcode.ts";
 import { AbortedWhileQueuedError, Semaphore } from "./concurrency.ts";
 import { type ChatCompletionRequest, type ChatMessage, checkMessages, errorResponse, flattenMessages } from "./openai.ts";
 import { bufferedResponse, type ResponseContext, streamResponse } from "./responses.ts";
 import { parseRequestOptions } from "./requestOptions.ts";
 import { resolveWorkdir } from "./workdir.ts";
-import { getOpenAIModel, listOpenAIModels } from "./discovery.ts";
+import { commandcodeModelList, getOpenAIModel, listOpenAIModels } from "./discovery.ts";
 
 const port = Number(Bun.env.PORT) || 8080;
 
-// Caps how many CLI child processes (claude/codex) run at once — each one
+// Caps how many CLI child processes (claude/codex/commandcode) run at once — each one
 // costs hundreds of MB. Requests past the cap queue instead of failing; see
 // src/concurrency.ts and issue #5.
 const cliSlots = new Semaphore(maxConcurrency);
@@ -48,6 +49,17 @@ Bun.serve({
 
     if (req.method === "GET" && url.pathname === "/v1/models") {
       return Response.json(listOpenAIModels());
+    }
+
+    // commandcode Models come from the CLI's live catalog, not models.json, so
+    // they are listed here rather than under /v1/models (see ./discovery.ts).
+    if (req.method === "GET" && url.pathname === "/v1/commandcode/models") {
+      try {
+        return Response.json(commandcodeModelList(await discoverCommandcodeModels(), url.searchParams.get("q")));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return errorResponse(`Failed to list commandcode models: ${message}`, 502, "backend_error");
+      }
     }
 
     // Kept as a plain prefix check, matching the exact-string style used
@@ -107,13 +119,29 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     );
   }
 
-  const modelConfig = getModel(body.model);
-  if (!modelConfig) {
-    return errorResponse(
-      `Unknown model "${body.model}". Valid models: ${modelNames().join(", ")}`,
-      404,
-      "invalid_request_error",
-    );
+  // A commandcode Model is resolved against the CLI's catalog on each request;
+  // every other name is looked up in models.json.
+  let modelConfig: ModelConfig | undefined;
+  if (body.model.startsWith(MODEL_PREFIX)) {
+    try {
+      const resolved = await resolveCommandcodeModel(body.model);
+      if (!resolved.ok) {
+        return errorResponse(resolved.message, resolved.status, resolved.type, resolved.code);
+      }
+      modelConfig = resolved.model;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return errorResponse(`Failed to list commandcode models: ${message}`, 502, "backend_error");
+    }
+  } else {
+    modelConfig = getModel(body.model);
+    if (!modelConfig) {
+      return errorResponse(
+        `Unknown model "${body.model}". Valid models: ${modelNames().join(", ")}`,
+        404,
+        "invalid_request_error",
+      );
+    }
   }
 
   const backend = getBackend(modelConfig.backend);
@@ -126,6 +154,9 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     return errorResponse(parsed.message, 400);
   }
   const options = parsed.value;
+  if (options.responseFormat && !backend.jsonSchema) {
+    return errorResponse(`"response_format" is not supported by the ${backend.label} Backend`, 400);
+  }
 
   // Every Turn runs in a directory the server picked: the configured default,
   // or a requested one that resolves inside WORKDIR_ROOTS.

@@ -44,7 +44,7 @@ declare namespace Bun {
 }
 
 // The few Node built-ins this project imports (config, workdir resolution,
-// temp files for codex's output schema). Declared by hand for the same reason
+// temp files for codex's output schema, the commandcode catalog cache). Declared by hand for the same reason
 // as the Bun globals above: no @types/node dependency.
 declare module "node:fs" {
   export function realpathSync(path: string): string;
@@ -53,6 +53,8 @@ declare module "node:fs" {
   export function mkdtempSync(prefix: string): string;
   export function writeFileSync(path: string, data: string): void;
   export function rmSync(path: string, options?: { recursive?: boolean; force?: boolean }): void;
+  export function readdirSync(path: string): string[];
+  export function readFileSync(path: string, encoding: "utf8"): string;
 }
 
 declare module "node:os" {

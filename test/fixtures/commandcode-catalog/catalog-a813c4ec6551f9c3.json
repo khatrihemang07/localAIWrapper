@@ -1,0 +1,273 @@
+{
+ "cacheVersion": 3,
+ "scope": {
+  "endpointHash": "a813c4ec6551f9c37a4b1e483e01b4d5c28f8e53b041545acb2bbc3b63bba0ac",
+  "schemaVersion": 1
+ },
+ "fetchedAt": 1792938891794,
+ "renderedAt": 1792686370069,
+ "body": {
+  "catalogVersion": "f41a48ed9b124a017dcefa799a1f9be52d8c46f77098e47980174ec4853dba3a",
+  "data": [
+   {
+    "aliases": [],
+    "behaviorProfile": "anthropic-prefix-bound-forced-v1",
+    "category": "opensource",
+    "context_length": 1000000,
+    "display": {
+     "badge": null,
+     "description": "fastest & most compact, great for quick tasks",
+     "group": "Anthropic",
+     "label": "Claude Haiku 5.5",
+     "notice": null,
+     "order": 74
+    },
+    "id": "claude-haiku-5-5",
+    "inputModalities": [
+     "text",
+     "image"
+    ],
+    "maxOutputTokens": null,
+    "minimumPlan": "individual-goat",
+    "name": "Claude Haiku 5.5",
+    "object": "model",
+    "owned_by": "command-code",
+    "pricing": {
+     "cacheReadCost": 0.01,
+     "cacheWrite1hCost": 0.2,
+     "cacheWriteCost": 0.125,
+     "contextTiers": [
+      {
+       "maxContext": 100000,
+       "rates": {
+        "cacheReadCost": 0.01,
+        "cacheWrite1hCost": 0.2,
+        "cacheWriteCost": 0.125,
+        "inputCost": 0.1,
+        "outputCost": 0.5
+       }
+      },
+      {
+       "rates": {
+        "cacheReadCost": 0.05,
+        "cacheWrite1hCost": 1,
+        "cacheWriteCost": 0.625,
+        "inputCost": 0.5,
+        "outputCost": 2.5
+       }
+      }
+     ],
+     "inputCost": 0.1,
+     "outputCost": 0.5
+    },
+    "reasoningEfforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ],
+    "zdr": true
+   },
+   {
+    "aliases": [],
+    "behaviorProfile": "no-deferred-tools-v1",
+    "category": "opensource",
+    "context_length": 1050000,
+    "display": {
+     "badge": null,
+     "description": "frontier model for complex professional work",
+     "group": "OpenAI",
+     "label": "GPT-5.6 Sol",
+     "notice": null,
+     "order": 80
+    },
+    "id": "gpt-5.6-sol",
+    "inputModalities": [
+     "text",
+     "image"
+    ],
+    "maxOutputTokens": null,
+    "minimumPlan": "individual-goat",
+    "name": "GPT-5.6 Sol",
+    "object": "model",
+    "owned_by": "command-code",
+    "pricing": {
+     "cacheReadCost": 0.5,
+     "cacheWriteCost": 6.25,
+     "contextTiers": [
+      {
+       "maxContext": 272000,
+       "rates": {
+        "cacheReadCost": 0.5,
+        "cacheWriteCost": 6.25,
+        "inputCost": 5,
+        "outputCost": 30
+       }
+      },
+      {
+       "rates": {
+        "cacheReadCost": 1,
+        "cacheWriteCost": 12.5,
+        "inputCost": 10,
+        "outputCost": 45
+       }
+      }
+     ],
+     "inputCost": 5,
+     "outputCost": 30
+    },
+    "reasoningEfforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ],
+    "zdr": true
+   },
+   {
+    "aliases": [],
+    "behaviorProfile": "standard-v1",
+    "category": "opensource",
+    "context_length": 1000000,
+    "display": {
+     "badge": null,
+     "description": "fast hybrid-attention reasoning",
+     "group": "Open Source",
+     "label": "DeepSeek V4 Flash (latest)",
+     "notice": null,
+     "order": 2
+    },
+    "id": "deepseek/deepseek-v4-flash",
+    "inputModalities": [
+     "text"
+    ],
+    "maxOutputTokens": null,
+    "minimumPlan": "individual-go",
+    "name": "DeepSeek V4 Flash (latest)",
+    "object": "model",
+    "owned_by": "command-code",
+    "pricing": {
+     "cacheReadCost": 0.003,
+     "inputCost": 0.15,
+     "outputCost": 0.6
+    },
+    "reasoningEfforts": [
+     "off",
+     "high",
+     "max"
+    ],
+    "zdr": true
+   },
+   {
+    "aliases": [],
+    "behaviorProfile": "standard-v1",
+    "category": "opensource",
+    "context_length": 1000000,
+    "display": {
+     "badge": null,
+     "description": "low-latency V4 Flash deployment",
+     "group": "Open Source",
+     "label": "DeepSeek V4 Flash Fast",
+     "notice": null,
+     "order": 4
+    },
+    "id": "deepseek/deepseek-v4-flash-fast",
+    "inputModalities": [
+     "text"
+    ],
+    "maxOutputTokens": null,
+    "minimumPlan": "individual-go",
+    "name": "DeepSeek V4 Flash Fast",
+    "object": "model",
+    "owned_by": "command-code",
+    "pricing": {
+     "cacheReadCost": 0.07,
+     "inputCost": 0.28,
+     "outputCost": 0.56
+    },
+    "reasoningEfforts": [
+     "low",
+     "high",
+     "max"
+    ],
+    "zdr": true
+   },
+   {
+    "aliases": [],
+    "behaviorProfile": "standard-v1",
+    "category": "opensource",
+    "context_length": 256000,
+    "display": {
+     "badge": null,
+     "description": "multimodal frontend coding",
+     "group": "Open Source",
+     "label": "Kimi K2.5",
+     "notice": null,
+     "order": 12
+    },
+    "id": "moonshotai/Kimi-K2.5",
+    "inputModalities": [
+     "text",
+     "image"
+    ],
+    "maxOutputTokens": null,
+    "minimumPlan": "individual-go",
+    "name": "Kimi K2.5",
+    "object": "model",
+    "owned_by": "command-code",
+    "pricing": {
+     "cacheReadCost": 0.1,
+     "inputCost": 0.6,
+     "outputCost": 3
+    },
+    "reasoningEfforts": null,
+    "zdr": true
+   },
+   {
+    "aliases": [],
+    "behaviorProfile": "standard-v1",
+    "category": "opensource",
+    "context_length": 197000,
+    "display": {
+     "badge": "free",
+     "description": "end-to-end software engineering agent",
+     "group": "Open Source",
+     "label": "MiniMax M2.7",
+     "notice": null,
+     "order": 25
+    },
+    "hidden": true,
+    "id": "minimax/minimax-m2.7-free",
+    "inputModalities": [
+     "text"
+    ],
+    "maxOutputTokens": null,
+    "minimumPlan": "individual-go",
+    "name": "MiniMax M2.7 (Free)",
+    "object": "model",
+    "owned_by": "command-code",
+    "reasoningEfforts": null,
+    "zdr": true
+   }
+  ],
+  "object": "list",
+  "refreshAfterSeconds": 900,
+  "roles": {
+   "default": "deepseek/deepseek-v4-flash",
+   "features": {
+    "branchSummarization": "deepseek/deepseek-v4-pro",
+    "compaction": "deepseek/deepseek-v4.1-flash",
+    "tasteOnboarding": "deepseek/deepseek-v4-flash",
+    "titleGeneration": "deepseek/deepseek-v4-flash",
+    "toolDescription": "deepseek/deepseek-v4-flash",
+    "vision": "deepseek/deepseek-v4.1-flash"
+   },
+   "zdrFeatures": {
+    "vision": "deepseek/deepseek-v4.1-flash"
+   }
+  },
+  "schemaVersion": 1
+ }
+}
