@@ -9,6 +9,7 @@ import { resolveWorkdir } from "./workdir.ts";
 import { commandcodeModelList, getOpenAIModel, listOpenAIModels } from "./discovery.ts";
 
 const port = Number(Bun.env.PORT) || 8080;
+const host = Bun.env.HOST || "127.0.0.1";
 
 // Caps how many CLI child processes (claude/codex/commandcode) run at once — each one
 // costs hundreds of MB. Requests past the cap queue instead of failing; see
@@ -25,7 +26,7 @@ for (const [name, cfg] of Object.entries(models)) {
 }
 
 Bun.serve({
-  hostname: "127.0.0.1",
+  hostname: host,
   port,
   // Bun closes a connection that goes this many seconds without a byte, and
   // its default is 10 — which is shorter than the gap before the *first*
@@ -77,7 +78,7 @@ Bun.serve({
   },
 });
 
-console.log(`localAIWrapper listening on http://127.0.0.1:${port} (max concurrency ${maxConcurrency}, turn timeout ${turnTimeoutMs}ms)`);
+console.log(`localAIWrapper listening on http://${host}:${port} (max concurrency ${maxConcurrency}, turn timeout ${turnTimeoutMs}ms)`);
 
 // Per-Turn progress logging (issue: no visibility into whether a slow
 // request is queued, running, or hung). turnId correlates every line for one
