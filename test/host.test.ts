@@ -1,17 +1,22 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Boots the real server on a spare port and reads its LISTEN address with lsof,
 // so the test checks what the OS actually bound, not what the code says.
 const REPO_DIR = join(import.meta.dir, "..");
+// Run from an empty folder: Bun loads a .env from the working directory, and a machine that
+// sets HOST in the repo's .env must not change what "HOST unset" means here.
+const RUN_DIR = mkdtempSync(join(tmpdir(), "wrapper-host-test-"));
 
 async function listenAddress(port: number, host?: string): Promise<string> {
   const env: Record<string, string> = { ...(Bun.env as Record<string, string>), PORT: String(port) };
   delete env.HOST;
   if (host !== undefined) env.HOST = host;
 
-  const server = Bun.spawn(["bun", "run", "src/server.ts"], {
-    cwd: REPO_DIR,
+  const server = Bun.spawn(["bun", "run", join(REPO_DIR, "src/server.ts")], {
+    cwd: RUN_DIR,
     env,
     stdout: "pipe",
     stderr: "pipe",
