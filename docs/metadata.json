@@ -1,0 +1,61 @@
+{
+    "generation_info": {
+        "timestamp": "2026-10-28T04:20:22.744769+00:00",
+        "provider": "claude-code",
+        "main_model": "claude-sonnet-5-5",
+        "generator_version": "2.0.0",
+        "repo_path": "/Users/mandalorian/Documents/Code/localAIWrapper",
+        "commit_id": "8477119de34ed0dca6fed1aadaf9cf6512ea8dc0",
+        "language": null,
+        "layout": "hierarchical"
+    },
+    "statistics": {
+        "total_components": 108,
+        "leaf_nodes": 77,
+        "max_depth": 2
+    },
+    "files_generated": [
+        "overview.md",
+        "module_tree.json",
+        "first_module_tree.json"
+    ],
+    "usage": {
+        "scope": "this run only (modules resumed from disk cost nothing)",
+        "n_calls": 1,
+        "totals": {
+            "input_tokens": 8,
+            "output_tokens": 3631,
+            "total_tokens": 3639,
+            "cache_read_tokens": 137326,
+            "cache_write_tokens": 72433,
+            "cost_usd": 0.33979059999999994
+        },
+        "by_phase": {
+            "modules": {
+                "calls": 1,
+                "input_tokens": 8,
+                "output_tokens": 3631,
+                "total_tokens": 3639,
+                "cache_read_tokens": 137326,
+                "cache_write_tokens": 72433,
+                "cost_usd": 0.33979059999999994
+            }
+        },
+        "unpriced_models": [],
+        "calls": [
+            {
+                "phase": "modules",
+                "kind": "module_agent",
+                "target": "localAIWrapper",
+                "model": "claude-sonnet-5-5",
+                "seconds": 44.05,
+                "input_tokens": 8,
+                "output_tokens": 3631,
+                "total_tokens": 3639,
+                "cache_read_tokens": 137326,
+                "cache_write_tokens": 72433,
+                "cost_usd": 0.33979059999999994
+            }
+        ]
+    }
+}

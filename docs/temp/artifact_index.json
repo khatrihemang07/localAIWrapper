@@ -1,0 +1,65 @@
+{
+    "token_budget": 200000,
+    "tokens_used": 5384,
+    "caps": {
+        "per_file_bytes": 16384,
+        "per_class_files": 40,
+        "per_file_units": 25
+    },
+    "with_prose": false,
+    "classes": {
+        "manifest": {
+            "files": [
+                {
+                    "path": "package.json",
+                    "bytes": 287,
+                    "truncated": false,
+                    "loaded": true,
+                    "units": [
+                        "start",
+                        "test",
+                        "test:unit",
+                        "typecheck"
+                    ]
+                },
+                {
+                    "path": "tsconfig.json",
+                    "bytes": 455,
+                    "truncated": false,
+                    "loaded": true,
+                    "units": []
+                }
+            ],
+            "omitted_by_class_cap": [],
+            "not_loaded_budget": []
+        },
+        "config": {
+            "files": [
+                {
+                    "path": "models.json",
+                    "bytes": 927,
+                    "truncated": false,
+                    "loaded": true,
+                    "units": []
+                }
+            ],
+            "omitted_by_class_cap": [],
+            "not_loaded_budget": []
+        },
+        "script": {
+            "files": [
+                {
+                    "path": "test.sh",
+                    "bytes": 54231,
+                    "truncated": true,
+                    "loaded": true,
+                    "units": []
+                }
+            ],
+            "omitted_by_class_cap": [],
+            "not_loaded_budget": []
+        }
+    },
+    "nodes": 8,
+    "edges": 20
+}
