@@ -9,7 +9,7 @@ your client  ──POST /v1/chat/completions──▶  localAIWrapper  ──spa
 
 - One request = one fresh CLI process. The server keeps no state between requests.
 - It uses your logged-in `claude` / `codex` / `commandcode` subscription, so no API key is needed.
-- It is a wrapper, not an agent harness: it does not do tool calling. Your client (or harness) owns any tool loop.
+- It is a wrapper, not an agent harness: it runs no tools. Your client (or harness) owns any tool loop. Tool calling is rejected by default; set `TOOL_EMULATION=1` to have the wrapper emulate it for clients that need `tool_calls` (see `docs/adr/0009-opt-in-tool-call-emulation.md`).
 
 Vocabulary (Backend, Model, Turn, Workdir, Access) is in `CONTEXT.md`. The reasoning behind the design is in `docs/adr/`.
 
@@ -59,6 +59,7 @@ Every setting is an environment variable put in front of the same command. All a
 | Let requests read a folder (`access` + `workdir`) | `WORKDIR_ROOTS=$HOME/code/demo bun run start` |
 | Run more or fewer CLIs at once (default 4) | `MAX_CONCURRENCY=2 bun run start` |
 | Give slow requests more time (default 10 min) | `TURN_TIMEOUT_MS=1800000 bun run start` |
+| Serve clients that send `tools` (emulated, off by default) | `TOOL_EMULATION=1 bun run start` |
 | Everything at once | `PORT=9000 WORKDIR_ROOTS=$HOME/code/demo MAX_CONCURRENCY=2 TURN_TIMEOUT_MS=120000 bun run start` |
 
 Details for each variable are under [Configuration](#configuration).
@@ -423,7 +424,7 @@ What `access` means per Backend:
 | `read-only` | `Read`, `Glob`, `Grep` | read-only sandbox | headless, so writes are blocked; reads are not confined to the workdir |
 | `workspace-write` | adds `Edit`, `Write` | may write inside the workdir | not offered (no confinement) |
 
-Other standard fields (`temperature`, `max_tokens`, …) are accepted and ignored. `tools`, `functions` and `tool_choice` are rejected.
+Other standard fields (`temperature`, `max_tokens`, …) are accepted and ignored. `tools`, `functions` and `tool_choice` are rejected unless the server was started with `TOOL_EMULATION=1`.
 
 ## Configuration
 

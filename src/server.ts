@@ -3,13 +3,19 @@ import { getBackend, type TurnRun } from "./backends/index.ts";
 import { discoverCommandcodeModels, MODEL_PREFIX, resolveCommandcodeModel } from "./backends/commandcode.ts";
 import { AbortedWhileQueuedError, Semaphore } from "./concurrency.ts";
 import { type ChatCompletionRequest, type ChatMessage, checkMessages, errorResponse, flattenMessages } from "./openai.ts";
-import { bufferedResponse, type ResponseContext, streamResponse } from "./responses.ts";
+import { bufferedResponse, bufferedToSse, type ResponseContext, streamResponse } from "./responses.ts";
+import { parseToolReply, prepareToolEmulation, type ToolEmulation } from "./toolEmulation.ts";
 import { parseRequestOptions } from "./requestOptions.ts";
 import { resolveWorkdir } from "./workdir.ts";
 import { commandcodeModelList, getOpenAIModel, listOpenAIModels } from "./discovery.ts";
 
 const port = Number(Bun.env.PORT) || 8080;
 const host = Bun.env.HOST || "127.0.0.1";
+
+// Off by default: tool-bearing requests are rejected with 400. When "1", they
+// are served by prompting the model to emit <tool_call> blocks (see
+// src/toolEmulation.ts and docs/adr/0009-opt-in-tool-call-emulation.md).
+const toolEmulationEnabled = Bun.env.TOOL_EMULATION === "1";
 
 // Caps how many CLI child processes (claude/codex/commandcode) run at once — each one
 // costs hundreds of MB. Requests past the cap queue instead of failing; see
@@ -106,18 +112,31 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     return errorResponse('"messages" must be a non-empty array', 400);
   }
-  const messagesError = checkMessages(body.messages as ChatMessage[]);
+  // Tool calling is rejected loudly unless emulation is on: silently stripping
+  // `tools`/`functions`/`tool_choice` would leave a client that expects
+  // `tool_calls` back hanging (see issue #5).
+  const hasToolFields = body.tools !== undefined || body.functions !== undefined || body.tool_choice !== undefined;
+  // A follow-up Turn can carry tool history (assistant tool_calls, role "tool")
+  // without re-sending `tools`; it still needs flattening to text.
+  const hasToolHistory = (body.messages as Array<Record<string, unknown>>).some(
+    (m) => m?.role === "tool" || m?.role === "function" || (m?.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0),
+  );
+  let emulation: ToolEmulation | undefined;
+  if (hasToolFields || (toolEmulationEnabled && hasToolHistory)) {
+    if (!toolEmulationEnabled) {
+      return errorResponse(
+        'This server does not support tool calling; requests containing "tools", "functions" or "tool_choice" are rejected rather than silently ignored.',
+        400,
+      );
+    }
+    const prepared = prepareToolEmulation(body as Parameters<typeof prepareToolEmulation>[0]);
+    if (!prepared.ok) return errorResponse(prepared.message, 400);
+    emulation = prepared.value;
+  }
+  const messages = emulation ? emulation.messages : (body.messages as ChatMessage[]);
+  const messagesError = checkMessages(messages);
   if (messagesError) {
     return errorResponse(messagesError, 400);
-  }
-  // Tool calling is out of scope (see issue #5): reject loudly rather than
-  // silently stripping `tools`/`functions`/`tool_choice` — a client that expects
-  // `tool_calls` back would otherwise hang forever waiting for them.
-  if (body.tools !== undefined || body.functions !== undefined || body.tool_choice !== undefined) {
-    return errorResponse(
-      'This server does not support tool calling; requests containing "tools", "functions" or "tool_choice" are rejected rather than silently ignored.',
-      400,
-    );
   }
 
   // A commandcode Model is resolved against the CLI's catalog on each request;
@@ -170,9 +189,15 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     workdir = resolvedDir.path;
   }
 
-  const { system, prompt } = flattenMessages(body.messages as ChatMessage[]);
-  const effectiveModel = { ...modelConfig, systemPrompt: system ?? modelConfig.systemPrompt };
+  const { system, prompt } = flattenMessages(messages);
+  const baseSystem = system ?? modelConfig.systemPrompt;
+  const systemPrompt = emulation?.instructions ? [baseSystem, emulation.instructions].filter(Boolean).join("\n\n") : baseSystem;
+  const effectiveModel = { ...modelConfig, systemPrompt };
   const stream = body.stream === true;
+  // An emulated reply must be read whole to tell a tool call from prose, so the
+  // Backend runs buffered and a streaming client is re-framed afterwards.
+  const emulated = emulation !== undefined && emulation.toolNames.size > 0;
+  const backendStream = stream && !emulated;
   log(`validated: model=${body.model} backend=${backend.label} stream=${stream} access=${options.access} web=${options.web} workdir=${workdir}`);
 
   // ---- Lifecycle: concurrency cap, timeout, client-disconnect cancellation.
@@ -252,7 +277,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
       {
         model: effectiveModel,
         prompt,
-        stream,
+        stream: backendStream,
         reasoningEffort: options.reasoningEffort,
         web: options.web,
         access: options.access,
@@ -279,11 +304,13 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     log,
     requestStartedAt,
   };
-  if (stream) {
+  if (backendStream) {
     return streamResponse(run, responseContext, settle);
   }
   try {
-    return await bufferedResponse(run, responseContext);
+    const parseReply = emulated ? (text: string) => parseToolReply(text, emulation!.toolNames) : undefined;
+    const buffered = await bufferedResponse(run, responseContext, parseReply);
+    return stream ? await bufferedToSse(buffered) : buffered;
   } finally {
     settle();
   }
