@@ -127,3 +127,16 @@ test("tool history without a tools list is still flattened, with nothing offered
   expect(p.value.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
   expect(p.value.messages[1]!.content).toContain("<tool_call>");
 });
+
+test("a developer message is treated as a system message", () => {
+  const p = prepareToolEmulation({
+    tools,
+    messages: [
+      { role: "developer", content: "dev rules" },
+      { role: "user", content: "go" },
+    ],
+  });
+  expect(p.ok).toBe(true);
+  if (!p.ok) return;
+  expect(p.value.messages[0]).toEqual({ role: "system", content: "dev rules" });
+});

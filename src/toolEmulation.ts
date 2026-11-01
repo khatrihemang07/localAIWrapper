@@ -110,8 +110,8 @@ export function prepareToolEmulation(body: {
       const id = typeof m.tool_call_id === "string" ? m.tool_call_id : "";
       const name = (typeof m.name === "string" && m.name) || callNames.get(id) || "unknown";
       messages.push({ role: "user", content: `<tool_result name="${name}" id="${id}">\n${textOf(m.content)}\n</tool_result>` });
-    } else if (role === "system" || role === "user") {
-      messages.push({ role, content: textOf(m.content) });
+    } else if (role === "system" || role === "developer" || role === "user") {
+      messages.push({ role: role === "developer" ? "system" : role, content: textOf(m.content) });
     } else {
       return { ok: false, message: `unsupported message role "${String(role)}"` };
     }

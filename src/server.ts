@@ -124,6 +124,8 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   let emulation: ToolEmulation | undefined;
   if (hasToolFields || (toolEmulationEnabled && hasToolHistory)) {
     if (!toolEmulationEnabled) {
+      const messagesError = checkMessages(body.messages as ChatMessage[]);
+      if (messagesError) return errorResponse(messagesError, 400);
       return errorResponse(
         'This server does not support tool calling; requests containing "tools", "functions" or "tool_choice" are rejected rather than silently ignored.',
         400,
