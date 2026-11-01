@@ -4,6 +4,7 @@
 
 import type { TurnRun, Usage } from "./backends/index.ts";
 import { type ChatCompletionResponse, completionId, errorResponse, sseFrame, SSE_DONE } from "./openai.ts";
+import type { ToolCall } from "./toolEmulation.ts";
 
 export type AbortReason = "client_disconnected" | "timeout";
 
@@ -34,7 +35,10 @@ function describeReadFailure(err: unknown): string {
   return `Backend output could not be read: ${message}`;
 }
 
-export async function bufferedResponse(run: TurnRun, ctx: ResponseContext): Promise<Response> {
+/** Turns a finished reply's text into message content and tool calls (tool emulation). */
+export type ReplyParser = (text: string) => { content: string | null; toolCalls: ToolCall[] };
+
+export async function bufferedResponse(run: TurnRun, ctx: ResponseContext, parseReply?: ReplyParser): Promise<Response> {
   let text = "";
   let usage: Usage | undefined;
   let error: string | undefined;
@@ -76,12 +80,22 @@ export async function bufferedResponse(run: TurnRun, ctx: ResponseContext): Prom
   }
 
   ctx.log(`completed in ${elapsedMs}ms`);
+  const reply = parseReply ? parseReply(text) : { content: text, toolCalls: [] as ToolCall[] };
+  const called = reply.toolCalls.length > 0;
   const response: ChatCompletionResponse = {
     id: completionId(),
     object: "chat.completion",
     created: Math.floor(Date.now() / 1000),
     model: ctx.model,
-    choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+    choices: [
+      {
+        index: 0,
+        message: called
+          ? { role: "assistant", content: reply.content, tool_calls: reply.toolCalls }
+          : { role: "assistant", content: reply.content ?? "" },
+        finish_reason: called ? "tool_calls" : "stop",
+      },
+    ],
   };
   if (usage) {
     response.usage = usageChunkPayload(usage);
@@ -269,5 +283,35 @@ export function streamResponse(run: TurnRun, ctx: ResponseContext, onSettled: ()
       "cache-control": "no-cache",
       connection: "keep-alive",
     },
+  });
+}
+
+/**
+ * Re-frames a finished buffered completion as an SSE stream, for a streaming
+ * client whose reply had to be read whole first (tool emulation must see the
+ * full text to know whether it is a tool call). Error responses pass through
+ * untouched: headers were never committed, so a real status is still possible.
+ */
+export async function bufferedToSse(buffered: Response): Promise<Response> {
+  if (!buffered.ok) return buffered;
+  const full = (await buffered.json()) as ChatCompletionResponse;
+  const choice = full.choices[0];
+  const base = { id: full.id, object: "chat.completion.chunk" as const, created: full.created, model: full.model };
+  const frames: string[] = [];
+  if (choice.message.tool_calls?.length) {
+    const delta: { role: "assistant"; content?: string; tool_calls: Array<{ index: number; id: string; type: "function"; function: { name: string; arguments: string } }> } = {
+      role: "assistant",
+      tool_calls: choice.message.tool_calls.map((c, index) => ({ index, ...c })),
+    };
+    if (choice.message.content) delta.content = choice.message.content;
+    frames.push(sseFrame({ ...base, choices: [{ index: 0, delta, finish_reason: null }] }));
+  } else {
+    frames.push(sseFrame({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: choice.message.content ?? "" }, finish_reason: null }] }));
+  }
+  if (full.usage) frames.push(sseFrame({ ...base, choices: [], usage: full.usage }));
+  frames.push(sseFrame({ ...base, choices: [{ index: 0, delta: {}, finish_reason: choice.finish_reason }] }));
+  frames.push(SSE_DONE);
+  return new Response(frames.join(""), {
+    headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" },
   });
 }

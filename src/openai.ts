@@ -18,9 +18,8 @@ export type ChatCompletionRequest = {
   access?: string;
   workdir?: string;
   response_format?: unknown;
-  // Tool calling is unsupported (see the /v1/chat/completions guard in
-  // server.ts): these are typed here only so a request that includes them
-  // can be detected and rejected with 400, never silently stripped.
+  // Tool calling is rejected with 400 unless TOOL_EMULATION=1 (see the guard in
+  // server.ts and src/toolEmulation.ts), never silently stripped.
   tools?: unknown[];
   functions?: unknown[];
   tool_choice?: unknown;
@@ -34,8 +33,12 @@ export type ChatCompletionResponse = {
   choices: [
     {
       index: 0;
-      message: { role: "assistant"; content: string };
-      finish_reason: "stop";
+      message: {
+        role: "assistant";
+        content: string | null;
+        tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+      };
+      finish_reason: "stop" | "tool_calls";
     },
   ];
   usage?: {
@@ -55,8 +58,12 @@ export type ChatCompletionChunk = {
   model: string;
   choices: Array<{
     index: 0;
-    delta: { role?: "assistant"; content?: string };
-    finish_reason: "stop" | null;
+    delta: {
+      role?: "assistant";
+      content?: string;
+      tool_calls?: Array<{ index: number; id: string; type: "function"; function: { name: string; arguments: string } }>;
+    };
+    finish_reason: "stop" | "tool_calls" | null;
   }>;
   usage?: {
     prompt_tokens: number;
