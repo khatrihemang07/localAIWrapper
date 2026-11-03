@@ -6,6 +6,7 @@
 // way this server reaches one. See docs/adr/0007-cli-only-transport.md.
 
 import type { ModelConfig } from "../config.ts";
+import type { SavedImage } from "../images.ts";
 import type { Access, JsonSchemaFormat } from "../requestOptions.ts";
 import { claudeBackend } from "./claude.ts";
 import { codexBackend } from "./codex.ts";
@@ -43,6 +44,12 @@ export type TurnRequest = {
   /** Absolute, already validated realpath of the directory the Turn runs in. */
   workdir: string;
   responseFormat?: JsonSchemaFormat;
+  /**
+   * Images attached to the request, already saved as files by the caller, which
+   * also removes them when the Turn ends (docs/adr/0011). Absent or empty for a
+   * text-only Turn, whose argv and prompt must not change.
+   */
+  images?: SavedImage[];
 };
 
 /**

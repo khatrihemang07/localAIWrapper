@@ -82,6 +82,13 @@ function composePrompt(model: ModelConfig, prompt: string): string {
   return model.systemPrompt ? `${model.systemPrompt}\n\n${prompt}` : prompt;
 }
 
+/** The stdin text: system prompt and prompt, plus the image paths for reference. */
+export function codexPrompt(req: TurnRequest): string {
+  const text = composePrompt(req.model, req.prompt);
+  if (!req.images?.length) return text;
+  return `${text}\n\nAttached image files (also attached to this message):\n${req.images.map((i) => `- ${i.path}`).join("\n")}`;
+}
+
 // ---- invocation ------------------------------------------------------------
 
 /**
@@ -123,6 +130,11 @@ export function buildCodexArgs(req: TurnRequest, schemaFile?: string): string[] 
   if (schemaFile !== undefined) {
     args.push("--output-schema", schemaFile);
   }
+  // codex attaches images itself with `-i`; a model cannot view one by reading
+  // the file as text. See docs/adr/0011.
+  for (const image of req.images ?? []) {
+    args.push("-i", image.path);
+  }
 
   return args;
 }
@@ -155,7 +167,7 @@ export const codexBackend: Backend = {
         env: req.model.env,
         bin: req.model.bin,
         cleanup,
-        stdin: composePrompt(req.model, req.prompt),
+        stdin: codexPrompt(req),
       });
     } catch (err) {
       cleanup();

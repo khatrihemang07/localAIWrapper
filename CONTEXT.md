@@ -32,3 +32,7 @@ _Avoid_: cwd, project, repo
 What a Turn may do to its Workdir. For claude: `none` (the default: no file tools), `read-only`, or `workspace-write`. For codex: `read-only` (the default: its read-only sandbox, which can still read outside the Workdir) or `workspace-write`. For commandcode: `read-only`, the only value and the default (headless runs never get `--yolo`, so writes are blocked; see docs/adr/0008). A Model must declare the values it accepts. For claude these are not a sandbox; see docs/adr/0007.
 _Avoid_: Permission, sandbox, mode
 </content>
+
+**Image**:
+A picture sent in a message's content parts as a `data:` URL. It is saved to a per-Turn temp file that the Backend's CLI opens, and removed when the Turn ends; it is not part of the Workdir. See docs/adr/0011.
+_Avoid_: Attachment, upload

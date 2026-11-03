@@ -336,6 +336,13 @@ function composePrompt(model: ModelConfig, prompt: string): string {
   return model.systemPrompt ? `${model.systemPrompt}\n\n${prompt}` : prompt;
 }
 
+/** The stdin text: system prompt and prompt, plus the saved image paths. */
+export function commandcodePrompt(req: TurnRequest): string {
+  const text = composePrompt(req.model, req.prompt);
+  if (!req.images?.length) return text;
+  return `${text}\n\nAttached image files (view each with your file-reading tool):\n${req.images.map((i) => `- ${i.path}`).join("\n")}`;
+}
+
 export const commandcodeBackend: Backend = {
   label: "commandcode",
   // Measured: the CLI emits text_delta events as the answer is generated.
@@ -347,7 +354,7 @@ export const commandcodeBackend: Backend = {
       apiKeyVars: API_KEY_VARS,
       env: req.model.env,
       bin: req.model.bin,
-      stdin: composePrompt(req.model, req.prompt),
+      stdin: commandcodePrompt(req),
     });
   },
 };

@@ -2,7 +2,8 @@ import { getHarness, getModel, maxConcurrency, models, modelNames, type ModelCon
 import { getBackend, type TurnRun } from "./backends/index.ts";
 import { discoverCommandcodeModels, MODEL_PREFIX, resolveCommandcodeModel } from "./backends/commandcode.ts";
 import { AbortedWhileQueuedError, Semaphore } from "./concurrency.ts";
-import { type ChatCompletionRequest, type ChatMessage, checkMessages, errorResponse, flattenMessages } from "./openai.ts";
+import { type ChatCompletionRequest, type ChatMessage, checkMessages, errorResponse, extractImages, flattenMessages } from "./openai.ts";
+import { saveImages } from "./images.ts";
 import { bufferedResponse, bufferedToSse, type ResponseContext, streamResponse } from "./responses.ts";
 import { parseToolReply, prepareToolEmulation, type ToolEmulation } from "./toolEmulation.ts";
 import { parseRequestOptions } from "./requestOptions.ts";
@@ -112,6 +113,12 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     return errorResponse('"messages" must be a non-empty array', 400);
   }
+  // Content-part arrays become text here, before anything else reads the
+  // messages; the decoded images are only written to files once a slot is held.
+  const extracted = extractImages(body.messages);
+  if (!extracted.ok) return errorResponse(extracted.message, 400);
+  (body as { messages: unknown[] }).messages = extracted.messages;
+  const decodedImages = extracted.images;
   // Tool calling is rejected loudly unless emulation is on: silently stripping
   // `tools`/`functions`/`tool_choice` would leave a client that expects
   // `tool_calls` back hanging (see issue #5).
@@ -273,13 +280,18 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     clearTimeout(timeoutId);
     req.signal.removeEventListener("abort", onClientAbort);
     release?.();
+    imageFiles?.cleanup();
   };
+  // Saved just before the spawn and removed in settle(), which every exit path
+  // after this point goes through (success, failure, abort, failed spawn).
+  let imageFiles: ReturnType<typeof saveImages> | undefined;
 
   // The Backend owns its own execution from here: it spawns its CLI and hands
   // back a TurnRun that listens to turnAbort, so an abandoned or overlong Turn
   // is torn down without this function knowing what process it is killing.
   let run: TurnRun;
   try {
+    imageFiles = saveImages(decodedImages);
     run = backend.run(
       {
         model: effectiveModel,
@@ -290,6 +302,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
         access: options.access,
         workdir,
         responseFormat: options.responseFormat,
+        images: imageFiles.images,
       },
       turnAbort.signal,
     );

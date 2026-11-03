@@ -137,9 +137,12 @@ export function createClaudeLineDecoder(): (line: string) => DecodedLine | null 
  * read-only and workspace-write do not confine the Turn to its workdir. See
  * docs/adr/0007.
  */
-export function toolsFor(access: TurnRequest["access"], web: boolean): string[] {
+export function toolsFor(access: TurnRequest["access"], web: boolean, images = false): string[] {
   const tools: string[] = [];
-  if (access === "read-only" || access === "workspace-write") tools.push("Read", "Glob", "Grep");
+  // An image Turn needs Read to open the saved files, and nothing else (no
+  // Glob/Grep). Read is still not a sandbox: see docs/adr/0011.
+  if (images) tools.push("Read");
+  if (access === "read-only" || access === "workspace-write") tools.push(...(images ? ["Glob", "Grep"] : ["Read", "Glob", "Grep"]));
   if (access === "workspace-write") tools.push("Edit", "Write");
   if (web) tools.push("WebSearch", "WebFetch");
   return tools;
@@ -157,7 +160,7 @@ export function buildClaudeArgs(req: TurnRequest, schemaJson?: string): string[]
   // The harness strip (docs/adr/0002, superseded by 0007): no CLAUDE.md, no
   // hooks, no MCP servers, no session file, no browser integration, and only
   // the tools this request is allowed.
-  const tools = toolsFor(req.access, req.web);
+  const tools = toolsFor(req.access, req.web, (req.images?.length ?? 0) > 0);
   args.push("--safe-mode", "--no-session-persistence", "--no-chrome");
   args.push("--tools", tools.join(","));
   args.push("--allowed-tools", tools.join(","));
@@ -183,6 +186,12 @@ export function buildClaudeArgs(req: TurnRequest, schemaJson?: string): string[]
   return args;
 }
 
+/** The prompt, with the saved image paths appended when the Turn has images. */
+export function claudePrompt(req: TurnRequest): string {
+  if (!req.images?.length) return req.prompt;
+  return `${req.prompt}\n\nAttached image files (view each with the Read tool):\n${req.images.map((i) => `- ${i.path}`).join("\n")}`;
+}
+
 export const claudeBackend: Backend = {
   label: "claude",
   streaming: true,
@@ -194,7 +203,7 @@ export const claudeBackend: Backend = {
       apiKeyVars: API_KEY_VARS,
       env: req.model.env,
       bin: req.model.bin,
-      stdin: req.prompt,
+      stdin: claudePrompt(req),
     });
   },
 };

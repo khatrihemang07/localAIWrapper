@@ -1,16 +1,29 @@
 // OpenAI-shaped request/response types, message flattening, SSE framing,
 // and the error envelope. Kept independent of any Backend.
 
+import { decodeDataUrl, imageLimits, type DecodedImage, type ImageLimits } from "./images.ts";
+
 export type ChatRole = "system" | "user" | "assistant";
 
+/** A message as the Backends and flattenMessages see it: text only. */
 export type ChatMessage = {
   role: ChatRole;
   content: string;
 };
 
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: string } | string };
+
+/** A message as a client sends it: `content` is a string or an array of parts. */
+export type RequestMessage = {
+  role: ChatRole;
+  content: string | ContentPart[];
+};
+
 export type ChatCompletionRequest = {
   model: string;
-  messages: ChatMessage[];
+  messages: RequestMessage[];
   stream?: boolean;
   /** Validated against the resolved Model in src/requestOptions.ts. */
   reasoning_effort?: string;
@@ -71,6 +84,64 @@ export type ChatCompletionChunk = {
     total_tokens: number;
   };
 };
+
+export type ExtractResult =
+  | { ok: true; messages: Array<Record<string, unknown>>; images: DecodedImage[] }
+  | { ok: false; message: string };
+
+/**
+ * Turns content-part arrays into text. Text parts are joined with a newline and
+ * each image becomes an `[image N]` placeholder at its position, so "the second
+ * image" still means something in the prompt; the decoded images are returned
+ * in that order. Messages whose `content` is not an array (a string, null) are
+ * returned as they came, so a plain request is unchanged, and every other field
+ * (tool_calls, tool_call_id, ...) is kept for the tool-call emulation. Pure:
+ * nothing is written anywhere.
+ */
+/** Part types that carry media this server cannot pass on: a 400, not a silent drop. */
+const MEDIA_PART_TYPES = new Set(["input_audio", "audio", "file", "input_file", "video", "video_url", "input_image"]);
+
+export function extractImages(messages: unknown[], limits: ImageLimits = imageLimits()): ExtractResult {
+  type Part = { type?: unknown; text?: unknown; image_url?: unknown } | null;
+  const images: DecodedImage[] = [];
+  const out: Array<Record<string, unknown>> = [];
+  for (const m of messages as Array<Record<string, unknown>>) {
+    if (!m || typeof m !== "object" || !Array.isArray(m.content)) {
+      out.push(m);
+      continue;
+    }
+    const texts: string[] = [];
+    let messageHasImage = false;
+    for (const part of m.content as Part[]) {
+      const type = part?.type;
+      if (type === "image_url") {
+        messageHasImage = true;
+        const raw = part!.image_url;
+        const url = typeof raw === "string" ? raw : (raw as { url?: unknown } | null)?.url;
+        if (typeof url !== "string") return { ok: false, message: 'an "image_url" part needs an "image_url.url" string' };
+        if (images.length >= limits.maxImages) {
+          return { ok: false, message: `too many images; the limit is ${limits.maxImages} (MAX_IMAGES)` };
+        }
+        const decoded = decodeDataUrl(url, limits.maxBytes);
+        if (!decoded.ok) return { ok: false, message: decoded.message };
+        images.push(decoded.value);
+        texts.push(`[image ${images.length}]`);
+      } else if (typeof type === "string" && MEDIA_PART_TYPES.has(type)) {
+        // Media that would otherwise vanish from the prompt: refuse, never drop.
+        return { ok: false, message: `unsupported content part type "${type}"; only "text" and "image_url" are supported` };
+      } else if (type === "text" && typeof part!.text !== "string") {
+        return { ok: false, message: 'a "text" content part needs a "text" string' };
+      } else if (typeof part?.text === "string") {
+        texts.push(part.text);
+      }
+      // Any other part without text is ignored, as it was before images.
+    }
+    // Without images the parts join as before (no separator); an image message
+    // puts each part, placeholders included, on its own line.
+    out.push({ ...m, content: texts.join(messageHasImage ? "\n" : "") });
+  }
+  return { ok: true, messages: out, images };
+}
 
 // The server holds no state between Turns: every request resends the full
 // message history, which gets flattened into a single prompt string here.

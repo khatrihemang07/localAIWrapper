@@ -378,7 +378,33 @@ Output:
 
 The large `prompt_tokens` is the CLI's own built-in prompt and tool definitions, which every Turn carries. Streaming (`"stream": true`) works the same as for claude. See [commandcode: live Models](#commandcode-live-models-from-the-clis-catalog) for the rules.
 
-### 8. Things that are rejected
+### 8. Images
+
+Send an image as an OpenAI content part. Only `data:` URLs are accepted (`png`, `jpeg`, `gif`, `webp`; unpadded and URL-safe base64 are fine).
+
+```json
+{
+  "model": "claude-haiku",
+  "messages": [{
+    "role": "user",
+    "content": [
+      { "type": "text", "text": "What colour is this image?" },
+      { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgo..." } }
+    ]
+  }]
+}
+```
+
+Each image is saved to a temporary file for the Turn and removed when the Turn ends, however it ends. claude and commandcode are told the file paths in the prompt (one per line) and open them with their file-reading tool; codex gets each file with its own `-i` flag. The text of the message stays in place, with `[image 1]`, `[image 2]` marking where each image was. A request without images is unchanged.
+
+| Limit | Default | Env |
+| --- | --- | --- |
+| Images per request | `8` | `MAX_IMAGES` |
+| Bytes per image (decoded) | `10485760` (10 MiB) | `MAX_IMAGE_BYTES` |
+
+Rejected with 400: `http(s)` or `file:` URLs (nothing is fetched), a bad base64 body, another image type, too many or too large images, and any content part that is not `text` or `image_url` (audio, files). Every Model is assumed to accept images; a text-only one (for example `commandcode/deepseek/deepseek-v4-flash`) will not see them and may answer wrongly, so pick a vision Model (`commandcode/deepseek/deepseek-v4-flash-vision-exp` works). For claude an image Turn gives the model the `Read` tool, which is not a sandbox: it can read any file you can. See [ADR 0011](docs/adr/0011-images-as-saved-files.md).
+
+### 9. Things that are rejected
 
 Tool calling:
 ```json
@@ -438,6 +464,8 @@ Set these as environment variables when starting the server.
 | `WORKDIR_DEFAULT` | `~/.local/share/localAIWrapper/workdir` | Folder every Turn runs in unless the request names another. Created at startup if it is the default and missing; if you set it, it must already exist. |
 | `WORKDIR_ROOTS` | (empty) | Comma-separated folders a request's `workdir` may resolve into. `WORKDIR_DEFAULT` is always included. Each entry must exist. |
 | `MAX_CONCURRENCY` | `4` | Most CLI processes running at once. Extra requests wait in a queue. |
+| `MAX_IMAGES` | `8` | Most images one request may carry (400 beyond it). |
+| `MAX_IMAGE_BYTES` | `10485760` | Largest decoded image, in bytes (400 beyond it). |
 | `TURN_TIMEOUT_MS` | `600000` | Per-request budget including queue wait. Exceeding it kills the process and returns a 504. |
 
 Example with everything set:

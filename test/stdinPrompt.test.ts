@@ -82,3 +82,22 @@ test("commandcode gets --effort only when the request sets reasoning_effort, and
     expect(args).not.toContain("--max-turns");
   }
 });
+
+// ---- images (docs/adr/0011) ----
+
+import { commandcodePrompt } from "../src/backends/commandcode.ts";
+
+test("commandcode appends the saved image paths to its prompt and leaves argv alone", () => {
+  const model = { ...req().model, systemPrompt: undefined, backend: "commandcode", model: "deepseek/deepseek-v4-flash" };
+  const images = [{ path: "/tmp/x/img-1.png", mime: "image/png" }];
+  expect(commandcodePrompt(req({ model, prompt: "Human: hi", images }))).toBe(
+    "Human: hi\n\nAttached image files (view each with your file-reading tool):\n- /tmp/x/img-1.png",
+  );
+  expect(buildCommandcodeArgs(req({ model, images }))).toEqual(buildCommandcodeArgs(req({ model })));
+});
+
+test("regression: commandcode and claude prompts without images are unchanged", () => {
+  const model = { ...req().model, systemPrompt: "SYS", backend: "commandcode", model: "m" };
+  expect(commandcodePrompt(req({ model, prompt: "P" }))).toBe("SYS\n\nP");
+  expect(commandcodePrompt(req({ model, prompt: "P", images: [] }))).toBe("SYS\n\nP");
+});
