@@ -2,6 +2,9 @@
 // with a scrubbed environment, read NDJSON off its stdout, drain its stderr.
 // Which binary and which flags is the caller's business, not this file's.
 
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import type { EnvValue } from "../config.ts";
 import type { DecodedLine, TurnOutcome, TurnRun, Usage } from "./index.ts";
 
 /**
@@ -125,9 +128,44 @@ export type SpawnSpec = {
   stdin: string;
   /** Credentials to strip from the child's environment (plan billing). */
   apiKeyVars: readonly string[];
+  /**
+   * Extra environment from a Harness, merged over the scrubbed one. `{file}`
+   * values are read here, at spawn, so a rotated token is picked up without a
+   * restart.
+   */
+  env?: Record<string, EnvValue>;
+  /** Binary override from a Harness; replaces the `bin` argument of runCli. */
+  bin?: string;
   /** Runs once the Turn is over, success or failure (e.g. temp-file cleanup). */
   cleanup?: () => void;
 };
+
+/**
+ * Resolves a Harness env: text stays as is; `{file}` is read now, trimmed,
+ * with a leading `~` expanded. Errors name the variable and the path and never
+ * contain a value.
+ */
+export function resolveEnv(env: Record<string, EnvValue> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env ?? {})) {
+    if (typeof value === "string") {
+      out[name] = value;
+      continue;
+    }
+    const path = value.file === "~" || value.file.startsWith("~/") ? homedir() + value.file.slice(1) : value.file;
+    let text: string;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      throw new Error(`cannot read env ${name} from file "${path}"${code ? ` (${code})` : ""}`);
+    }
+    text = text.trim();
+    if (text.length === 0) throw new Error(`env ${name} file "${path}" is empty`);
+    out[name] = text;
+  }
+  return out;
+}
 
 /**
  * Spawns `bin` and turns its stdout into DecodedLines. Throws synchronously if
@@ -144,9 +182,9 @@ export function runCli(
 ): TurnRun {
   let proc: ReturnType<typeof Bun.spawn>;
   try {
-    proc = Bun.spawn([bin, ...args], {
+    proc = Bun.spawn([spec.bin ?? bin, ...args], {
       cwd: spec.cwd,
-      env: childEnvironment(Bun.env, spec.apiKeyVars),
+      env: { ...childEnvironment(Bun.env, spec.apiKeyVars), ...resolveEnv(spec.env) },
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -199,7 +237,7 @@ export function runCli(
       signal.removeEventListener("abort", killOnAbort);
       spec.cleanup?.();
       return {
-        failure: exitCode === 0 ? undefined : `${bin} exited with code ${exitCode}`,
+        failure: exitCode === 0 ? undefined : `${spec.bin ?? bin} exited with code ${exitCode}`,
         detail: stderrTail(stderrText),
       };
     },

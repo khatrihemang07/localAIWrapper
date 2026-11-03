@@ -1,4 +1,4 @@
-import { getModel, maxConcurrency, models, modelNames, type ModelConfig, turnTimeoutMs, workdirDefault, workdirRoots } from "./config.ts";
+import { getHarness, getModel, maxConcurrency, models, modelNames, type ModelConfig, turnTimeoutMs, workdirDefault, workdirRoots } from "./config.ts";
 import { getBackend, type TurnRun } from "./backends/index.ts";
 import { discoverCommandcodeModels, MODEL_PREFIX, resolveCommandcodeModel } from "./backends/commandcode.ts";
 import { AbortedWhileQueuedError, Semaphore } from "./concurrency.ts";
@@ -144,9 +144,14 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   // A commandcode Model is resolved against the CLI's catalog on each request;
   // every other name is looked up in models.json.
   let modelConfig: ModelConfig | undefined;
-  if (body.model.startsWith(MODEL_PREFIX)) {
+  // `<harness>/<id>` is the same pass-through, spawned with that Harness's env.
+  const slash = body.model.indexOf("/");
+  const passHarnessName = slash > 0 ? body.model.slice(0, slash) : undefined;
+  const passHarness = passHarnessName !== undefined && passHarnessName !== "commandcode" ? getHarness(passHarnessName) : undefined;
+  const commandcodeHarness = passHarness?.adapter === "commandcode" ? { name: passHarnessName!, ...passHarness } : undefined;
+  if (body.model.startsWith(MODEL_PREFIX) || commandcodeHarness) {
     try {
-      const resolved = await resolveCommandcodeModel(body.model);
+      const resolved = await resolveCommandcodeModel(body.model, commandcodeHarness);
       if (!resolved.ok) {
         return errorResponse(resolved.message, resolved.status, resolved.type, resolved.code);
       }

@@ -1,5 +1,8 @@
-import { expect, test } from "bun:test";
-import { childEnvironment } from "../src/backends/cli.ts";
+import { afterAll, expect, test } from "bun:test";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { childEnvironment, resolveEnv, runCli } from "../src/backends/cli.ts";
 import { API_KEY_VARS as COMMANDCODE_API_KEY_VARS } from "../src/backends/commandcode.ts";
 
 const CLAUDE_BILLING = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"];
@@ -104,4 +107,102 @@ test("drops commandcode session and parent markers, but keeps the user's own CMD
   expect(out.CMD_LOCAL_ONLY).toBe("1");
   expect(out.CMD_ZDR).toBe("1");
   expect(out.COMMAND_CODE_TELEMETRY_CONSOLE).toBe("1");
+});
+
+// ---- harness env (config.yaml) ----------------------------------------------
+
+const tmp = mkdtempSync(join(tmpdir(), "childenv-test-"));
+afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+type Spec = Parameters<typeof runCli>[4];
+
+/** Runs `sh -c script` through runCli and returns its stdout lines. */
+async function runSh(script: string, spec: Partial<Spec> = {}, bin = "sh"): Promise<string[]> {
+  const run = runCli(bin, ["-c", script], (line) => ({ text: line }), new AbortController().signal, {
+    cwd: tmp,
+    stdin: "",
+    apiKeyVars: [],
+    ...spec,
+  });
+  const lines: string[] = [];
+  for await (const e of run.events) if (e.text !== undefined) lines.push(e.text);
+  await run.finish();
+  return lines;
+}
+
+test("resolveEnv returns plain text as is and reads {file} values trimmed, expanding ~", () => {
+  const f = join(tmp, "tok");
+  writeFileSync(f, "  file-value\n");
+  expect(resolveEnv({ A: "text", B: { file: f } })).toEqual({ A: "text", B: "file-value" });
+  // ~ expands to the home directory (the file does not exist, so the error shows the expanded path)
+  expect(() => resolveEnv({ C: { file: "~/no-such-file-xyz" } })).toThrow(join(homedir(), "no-such-file-xyz"));
+});
+
+test("a harness env var reaches the child and wins over the inherited one; the parent env is untouched", async () => {
+  Bun.env.AA_TEST_VAR = "inherited";
+  try {
+    expect(await runSh('echo "$AA_TEST_VAR"')).toEqual(["inherited"]);
+    expect(await runSh('echo "$AA_TEST_VAR"', { env: { AA_TEST_VAR: "harness" } })).toEqual(["harness"]);
+    expect(Bun.env.AA_TEST_VAR).toBe("inherited");
+  } finally {
+    delete Bun.env.AA_TEST_VAR;
+  }
+});
+
+test("a harness env var survives the API-key strip because it was named explicitly", async () => {
+  const out = await runSh('echo "$ANTHROPIC_API_KEY"', { apiKeyVars: ["ANTHROPIC_API_KEY"], env: { ANTHROPIC_API_KEY: "mine" } });
+  expect(out).toEqual(["mine"]);
+});
+
+test("a {file} value is read at spawn time, not at boot", async () => {
+  const f = join(tmp, "rotating");
+  writeFileSync(f, "first\n");
+  const env = { AA_TEST_TOK: { file: f } };
+  expect(await runSh('echo "$AA_TEST_TOK"', { env })).toEqual(["first"]);
+  writeFileSync(f, "second\n");
+  expect(await runSh('echo "$AA_TEST_TOK"', { env })).toEqual(["second"]);
+});
+
+test("spec.bin overrides the binary", async () => {
+  expect(await runSh("echo hi", { bin: "sh" }, "definitely-not-a-binary")).toEqual(["hi"]);
+});
+
+test("an unreadable or missing env file throws an error naming the variable and path, never a value", () => {
+  const secret = "SUPER-SECRET-VALUE";
+  const missing = join(tmp, "missing-file");
+  expect(() => resolveEnv({ AA_TOK: { file: missing }, OTHER: secret })).toThrow(/AA_TOK/);
+  expect(() => resolveEnv({ AA_TOK: { file: missing } })).toThrow(missing);
+
+  const locked = join(tmp, "locked");
+  writeFileSync(locked, secret);
+  chmodSync(locked, 0o000);
+  let message = "";
+  try {
+    resolveEnv({ AA_TOK: { file: locked }, OTHER: secret });
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  chmodSync(locked, 0o600);
+  expect(message).toContain("AA_TOK");
+  expect(message).toContain(locked);
+  expect(message).not.toContain(secret);
+});
+
+test("an empty env file is an error, thrown by runCli before spawning, after cleanup runs", () => {
+  const empty = join(tmp, "empty");
+  writeFileSync(empty, " \n");
+  expect(() => resolveEnv({ AA_TOK: { file: empty } })).toThrow(/AA_TOK.*empty/);
+  let cleaned = false;
+  expect(() =>
+    runCli("sh", ["-c", "true"], () => null, new AbortController().signal, {
+      cwd: tmp,
+      stdin: "",
+      apiKeyVars: [],
+      env: { AA_TOK: { file: empty } },
+      cleanup: () => {
+        cleaned = true;
+      },
+    }),
+  ).toThrow(/AA_TOK/);
+  expect(cleaned).toBe(true);
 });

@@ -4,7 +4,7 @@
 // resolved live against the CLI's catalog (see src/backends/commandcode.ts and
 // docs/adr/0008), so they never appear in models.json.
 
-import { mkdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import rawModels from "../models.json";
@@ -42,7 +42,16 @@ export type ModelConfig = {
    */
   contextWindow?: number;
   options: ModelOptions;
+  /** Environment for the spawned CLI, from a Harness (config.yaml). `{file}` values are read at spawn. */
+  env?: Record<string, EnvValue>;
+  /** CLI binary override, from a Harness. */
+  bin?: string;
+  /** The Harness this Model came from, when it did. */
+  harness?: string;
 };
+
+/** An environment value: the text itself, or a file whose trimmed content is the text. */
+export type EnvValue = string | { file: string };
 
 /**
  * The value an option takes when it is not in effect. An unsupported option
@@ -281,7 +290,142 @@ export function validateModels(raw: unknown): Record<string, ModelConfig> {
   return result;
 }
 
-export const models: Record<string, ModelConfig> = validateModels(rawModels);
+// ---- Harnesses (config.yaml, docs/adr/0010) ---------------------------------
+
+/** The Backends a Harness may adapt. */
+const HARNESS_ADAPTERS = ["claude", "codex", "commandcode"];
+const HARNESS_KEYS = ["adapter", "env", "bin"];
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+const HARNESS_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
+
+export type HarnessConfig = {
+  adapter: string;
+  env: Record<string, EnvValue>;
+  bin?: string;
+};
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function validateEnv(where: string, raw: unknown): Record<string, EnvValue> {
+  if (raw === undefined) return {};
+  if (!isPlainObject(raw)) throw new Error(`${where} "env" must be a map of variable name to text or {file: path}`);
+  const env: Record<string, EnvValue> = {};
+  for (const [name, value] of Object.entries(raw)) {
+    // Values are never echoed: they may be secrets.
+    if (!ENV_NAME.test(name)) throw new Error(`${where} env variable name "${name}" is not a valid name`);
+    if (typeof value === "string") {
+      env[name] = value;
+    } else if (isPlainObject(value)) {
+      const keys = Object.keys(value);
+      if (keys.length !== 1 || keys[0] !== "file" || typeof value.file !== "string" || value.file.length === 0) {
+        throw new Error(`${where} env "${name}" must be text or {file: "path"}`);
+      }
+      env[name] = { file: value.file };
+    } else {
+      throw new Error(`${where} env "${name}" must be text or {file: "path"}`);
+    }
+  }
+  return env;
+}
+
+/** Validates the `harnesses:` map of config.yaml into Harness configs. Names are checked against `baseModels` separately by validateHarnesses. */
+export function parseHarnesses(raw: unknown, _baseModels?: Record<string, ModelConfig>): Record<string, HarnessConfig> {
+  if (!isPlainObject(raw)) throw new Error("config.yaml: harnesses must be a map of harness name to config");
+  const result: Record<string, HarnessConfig> = {};
+  for (const [name, value] of Object.entries(raw)) {
+    const where = `config.yaml: harness "${name}"`;
+    if (!HARNESS_NAME.test(name)) {
+      throw new Error(`${where} has a name that cannot prefix a model name (use letters, digits, "-", "_", ".")`);
+    }
+    if (name === "commandcode") throw new Error(`${where} is named "commandcode", which is the pass-through prefix`);
+    if (!isPlainObject(value)) throw new Error(`${where} must be a map`);
+    for (const key of Object.keys(value)) {
+      if (!HARNESS_KEYS.includes(key)) throw new Error(`${where} has unknown key "${key}"`);
+    }
+    if (typeof value.adapter !== "string" || !HARNESS_ADAPTERS.includes(value.adapter)) {
+      throw new Error(
+        `${where} needs an "adapter" of ${HARNESS_ADAPTERS.join(", ")}${typeof value.adapter === "string" ? ` (got "${value.adapter}")` : ""}`,
+      );
+    }
+    if (value.bin !== undefined && (typeof value.bin !== "string" || value.bin.length === 0)) {
+      throw new Error(`${where} has a "bin" that is not a non-empty string`);
+    }
+    result[name] = {
+      adapter: value.adapter,
+      env: validateEnv(where, value.env),
+      ...(value.bin !== undefined ? { bin: value.bin as string } : {}),
+    };
+  }
+  return result;
+}
+
+/**
+ * Expands each Harness over the Models of its adapter: `claude-sonnet` under
+ * Harness `aclaude` becomes `aclaude-sonnet`. Returns only the added Models.
+ */
+export function validateHarnesses(raw: unknown, baseModels: Record<string, ModelConfig>): Record<string, ModelConfig> {
+  const harnesses = parseHarnesses(raw);
+  const added: Record<string, ModelConfig> = {};
+  for (const [name, h] of Object.entries(harnesses)) {
+    if (Object.hasOwn(baseModels, name)) {
+      throw new Error(`config.yaml: harness "${name}" has the same name as a model in models.json`);
+    }
+    for (const [baseName, base] of Object.entries(baseModels)) {
+      if (base.backend !== h.adapter) continue;
+      const prefix = `${h.adapter}-`;
+      const suffix = baseName.startsWith(prefix) ? baseName.slice(prefix.length) : baseName;
+      const expanded = `${name}-${suffix}`;
+      if (Object.hasOwn(baseModels, expanded) || Object.hasOwn(added, expanded) || Object.hasOwn(harnesses, expanded)) {
+        throw new Error(`config.yaml: harness "${name}" would create model "${expanded}", which already exists`);
+      }
+      added[expanded] = {
+        ...base,
+        env: { ...h.env },
+        ...(h.bin !== undefined ? { bin: h.bin } : {}),
+        harness: name,
+      };
+    }
+  }
+  return added;
+}
+
+/**
+ * Reads config.yaml. A missing file means no Harnesses and nothing changes.
+ * Returns the validated Harnesses and the Models they add.
+ */
+export function loadHarnesses(
+  path: string,
+  baseModels: Record<string, ModelConfig>,
+): { harnesses: Record<string, HarnessConfig>; models: Record<string, ModelConfig> } {
+  if (!existsSync(path)) return { harnesses: {}, models: {} };
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(readFileSync(path, "utf8"));
+  } catch (err) {
+    throw new Error(`${path}: cannot read or parse as YAML: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (parsed === null || parsed === undefined) return { harnesses: {}, models: {} };
+  if (!isPlainObject(parsed)) throw new Error(`${path} must be a YAML map`);
+  for (const key of Object.keys(parsed)) {
+    if (key !== "harnesses") throw new Error(`${path} has unknown top-level key "${key}"`);
+  }
+  if (parsed.harnesses === undefined || parsed.harnesses === null) return { harnesses: {}, models: {} };
+  return { harnesses: parseHarnesses(parsed.harnesses), models: validateHarnesses(parsed.harnesses, baseModels) };
+}
+
+const baseModels = validateModels(rawModels);
+const loaded = loadHarnesses(join(import.meta.dir, "..", "config.yaml"), baseModels);
+
+export const models: Record<string, ModelConfig> = { ...baseModels, ...loaded.models };
+
+/** The configured Harnesses by name (empty without a config.yaml). */
+export const harnesses: Record<string, HarnessConfig> = loaded.harnesses;
+
+export function getHarness(name: string): HarnessConfig | undefined {
+  return Object.hasOwn(harnesses, name) ? harnesses[name] : undefined;
+}
 
 export function getModel(name: string): ModelConfig | undefined {
   return models[name];

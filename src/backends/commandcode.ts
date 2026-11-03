@@ -22,7 +22,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type ModelConfig, resolveModelOptions } from "../config.ts";
+import { type EnvValue, type ModelConfig, resolveModelOptions } from "../config.ts";
 import type { Backend, DecodedLine, TurnRequest, TurnRun, Usage } from "./index.ts";
 import { childEnvironment, jsonLineDecoder, runCli, stderrTail } from "./cli.ts";
 
@@ -190,13 +190,18 @@ export type ResolutionResult = { ok: true; model: ModelConfig } | ResolutionFail
  * first as a full id, then as a short name. Matching ignores case. Two short
  * names matching is a 400 that lists the candidates.
  */
-export function resolveFromCatalog(requested: string, catalog: CatalogEntry[]): ResolutionResult {
-  const name = requested.slice(MODEL_PREFIX.length).toLowerCase();
+export function resolveFromCatalog(
+  requested: string,
+  catalog: CatalogEntry[],
+  harness?: { name: string; env: Record<string, EnvValue>; bin?: string },
+): ResolutionResult {
+  const prefix = harness ? `${harness.name}/` : MODEL_PREFIX;
+  const name = requested.slice(prefix.length).toLowerCase();
   let entry = catalog.find((e) => e.id.toLowerCase() === name);
   if (!entry) {
     const matches = catalog.filter((e) => e.shortName.toLowerCase() === name);
     if (matches.length > 1) {
-      const candidates = matches.map((m) => `${MODEL_PREFIX}${m.id}`).join(", ");
+      const candidates = matches.map((m) => `${prefix}${m.id}`).join(", ");
       return {
         ok: false,
         status: 400,
@@ -241,13 +246,20 @@ export function resolveFromCatalog(requested: string, catalog: CatalogEntry[]): 
       model: entry.id,
       options,
       ...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
+      ...(harness ? { env: { ...harness.env }, harness: harness.name, ...(harness.bin !== undefined ? { bin: harness.bin } : {}) } : {}),
     },
   };
 }
 
-/** Resolves a `commandcode/...` request name against the live catalog. */
-export async function resolveCommandcodeModel(requested: string): Promise<ResolutionResult> {
-  return resolveFromCatalog(requested, await loadCatalog());
+/**
+ * Resolves a `commandcode/...` request name against the live catalog, or a
+ * `<harness>/...` name when a commandcode Harness is given (it supplies the env).
+ */
+export async function resolveCommandcodeModel(
+  requested: string,
+  harness?: { name: string; env: Record<string, EnvValue>; bin?: string },
+): Promise<ResolutionResult> {
+  return resolveFromCatalog(requested, await loadCatalog(), harness);
 }
 
 // ---- decoding --------------------------------------------------------------
@@ -333,6 +345,8 @@ export const commandcodeBackend: Backend = {
     return runCli(BIN, buildCommandcodeArgs(req), decodeLine, signal, {
       cwd: req.workdir,
       apiKeyVars: API_KEY_VARS,
+      env: req.model.env,
+      bin: req.model.bin,
       stdin: composePrompt(req.model, req.prompt),
     });
   },

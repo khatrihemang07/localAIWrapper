@@ -192,6 +192,8 @@ export const claudeBackend: Backend = {
     return runCli(BIN, buildClaudeArgs(req, schemaJson), createClaudeLineDecoder(), signal, {
       cwd: req.workdir,
       apiKeyVars: API_KEY_VARS,
+      env: req.model.env,
+      bin: req.model.bin,
       stdin: req.prompt,
     });
   },

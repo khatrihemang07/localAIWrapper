@@ -16,6 +16,10 @@ _Avoid_: Engine, agent
 A Model that is not in `models.json`. It exists only in a Backend's live catalog, and a client names it `commandcode/<catalog id or short name>`. It is resolved on each request against the CLI's own catalog, so it tracks catalog changes without a config edit. Its options come from its catalog entry (reasoning efforts, context window) and the Backend's shared declarations. See docs/adr/0008.
 _Avoid_: Generated model, dynamic model
 
+**Harness**:
+A named way to run a Backend CLI, declared in the optional `config.yaml`: an adapter (the Backend) plus environment variables (text, or a file read at spawn) and an optional binary. Each Harness adds a copy of every Model of its adapter under `<harness>-<suffix>`, so a client picks it by Model name; for commandcode it also accepts `<harness>/<id>`. Its purpose is to run the same Backend under different accounts. See docs/adr/0010.
+_Avoid_: Profile, account, provider
+
 **Turn**:
 One chat-completions request, serviced by exactly one fresh invocation of a Backend. Turns share no state.
 _Avoid_: Session, request, conversation

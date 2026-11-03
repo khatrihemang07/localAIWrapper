@@ -41,6 +41,14 @@ declare namespace Bun {
   }
 
   function spawn(cmd: string[], options?: SpawnOptions): Subprocess;
+
+  /** Built-in YAML parser (Bun 1.3+); throws on invalid YAML. */
+  const YAML: { parse(text: string): unknown };
+}
+
+interface ImportMeta {
+  /** Directory of the current module. */
+  readonly dir: string;
 }
 
 // The few Node built-ins this project imports (config, workdir resolution,
@@ -55,6 +63,7 @@ declare module "node:fs" {
   export function rmSync(path: string, options?: { recursive?: boolean; force?: boolean }): void;
   export function readdirSync(path: string): string[];
   export function readFileSync(path: string, encoding: "utf8"): string;
+  export function existsSync(path: string): boolean;
 }
 
 declare module "node:os" {

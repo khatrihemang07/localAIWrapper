@@ -1,0 +1,22 @@
+# Optional. Copy to config.yaml (gitignored) and restart the server.
+# Without config.yaml the server behaves exactly as before.
+#
+# harnesses: a named way to run a Backend CLI, usually under another account.
+# Each harness adds a copy of every models.json Model of its adapter, named
+# <harness>-<suffix> (claude-sonnet -> aclaude-sonnet). For commandcode,
+# <harness>/<id> works like commandcode/<id>.
+#
+# env values are the text itself or {file: path}. A file is read each time a
+# Turn is spawned (trimmed, ~ expanded) and its content is never logged.
+# bin (optional) replaces the CLI binary.
+harnesses:
+  aclaude:
+    adapter: claude
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: {file: ~/.config/claude/oauth_token_a}
+  # xcodex:
+  #   adapter: codex
+  #   env: {CODEX_HOME: ~/.codex-second}
+  # cc2:
+  #   adapter: commandcode
+  #   env: {COMMAND_CODE_API_KEY: {file: ~/.config/commandcode/key_2}}

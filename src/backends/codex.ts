@@ -152,6 +152,8 @@ export const codexBackend: Backend = {
       return runCli(BIN, buildCodexArgs(req, schemaFile), decodeLine, signal, {
         cwd: req.workdir,
         apiKeyVars: API_KEY_VARS,
+        env: req.model.env,
+        bin: req.model.bin,
         cleanup,
         stdin: composePrompt(req.model, req.prompt),
       });

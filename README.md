@@ -73,7 +73,8 @@ Details for each variable are under [Configuration](#configuration).
 5. [Available models and discovery](#available-models-and-discovery)
 6. [Errors](#errors)
 7. [Adding a Model](#adding-a-model)
-8. [Development](#development)
+8. [Harnesses (several accounts)](#harnesses-several-accounts)
+9. [Development](#development)
 
 ## Quick start
 
@@ -584,6 +585,27 @@ Models live in `models.json`, not in code. Add an entry and restart:
 - `contextWindow` (optional): reported on `/v1/models` so clients can size their context.
 
 Option support comes from the Backend's shared declarations in `BACKEND_OPTION_DEFAULTS` (`src/config.ts`). To change one option for one Model, add an `options` object naming only that option. There is no raw CLI `args` escape hatch: each Backend applies its own flags (see `docs/adr/0007-cli-only-transport.md`). The server refuses to start on a malformed entry, an unknown key, or an unknown Backend.
+
+## Harnesses (several accounts)
+
+One server normally means one signed-in account per CLI. A **Harness** (see `CONTEXT.md`) lets one server use several: a named way to run a Backend CLI with its own environment, such as a different `CLAUDE_CODE_OAUTH_TOKEN`. It is optional. Copy `config.example.yaml` to `config.yaml` (gitignored, repo root) and restart. Without the file nothing changes.
+
+```yaml
+harnesses:
+  aclaude:
+    adapter: claude            # claude | codex | commandcode
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: {file: ~/.config/claude/oauth_token_a}
+  # bin: /path/to/cli          # optional: a different CLI binary
+```
+
+- At startup every `models.json` Model of the adapter is copied under `<harness>-<suffix>`, where the suffix is the Model name without its `<adapter>-` prefix: `claude-sonnet` gives `aclaude-sonnet`, `claude-haiku` gives `aclaude-haiku`. They appear in `GET /v1/models` and are chosen by the `model` field, like any Model. Options, system prompt and context window are the same as the original.
+- For `commandcode`, `<harness>/<id>` works like `commandcode/<id>` but runs with the Harness env. The catalog listing (`GET /v1/commandcode/models`) still uses the default environment.
+- An env value is text, or `{file: path}`. The file is read each time a Turn is spawned (trimmed, `~` expanded), so a rotated token needs no restart. Values are never logged or put in errors; an unreadable file names the variable and path only.
+- Harness env is added on top of the cleaned environment and wins over it, so it can set a variable the cleaning would remove.
+- The server refuses to start on a bad entry: an unknown adapter or key, a bad env value, or a name that already exists in `models.json` or another Harness.
+
+Reasoning: `docs/adr/0010-harnesses-in-config-yaml.md`.
 
 ## Development
 
