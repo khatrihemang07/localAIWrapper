@@ -247,6 +247,12 @@ test("discovery omits efforts and context window when the catalog says nothing",
   expect(row?.local_ai_wrapper).not.toHaveProperty("contextWindow");
 });
 
+test("discovery advertises reasoning_effort in supported_parameters only when efforts are listed", () => {
+  const withEfforts = commandcodeModelList(cached(), null).data.find((m) => m.id === "commandcode/deepseek/deepseek-v4-flash");
+  expect(withEfforts?.supported_parameters).toEqual(["reasoning_effort"]);
+  expect(commandcodeModelList(parseModelList(LISTING), null).data[0]?.supported_parameters).toEqual([]);
+});
+
 test("discovery's ?q= is a case-insensitive substring match on the id", () => {
   const ids = (q: string) => commandcodeModelList(cached(), q).data.map((m) => m.id);
   expect(ids("SPARK")).toEqual([]);
