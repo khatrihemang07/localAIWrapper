@@ -9,6 +9,7 @@ import { parseToolReply, prepareToolEmulation, type ToolEmulation } from "./tool
 import { parseRequestOptions } from "./requestOptions.ts";
 import { resolveWorkdir } from "./workdir.ts";
 import { commandcodeModelList, getOpenAIModel, listOpenAIModels } from "./discovery.ts";
+import { isLoopbackHost } from "./loopback.ts";
 
 const port = Number(Bun.env.PORT) || 8080;
 const host = Bun.env.HOST || "127.0.0.1";
@@ -30,6 +31,11 @@ for (const [name, cfg] of Object.entries(models)) {
   if (!getBackend(cfg.backend)) {
     throw new Error(`models.json: model "${name}" names unknown backend "${cfg.backend}"`);
   }
+}
+
+// Warn before binding, so the warning is always written ahead of the listen line.
+if (!isLoopbackHost(host)) {
+  console.warn(`WARNING: HOST=${host} exposes this server to the network. It has no authentication; anyone who can reach ${host}:${port} can run Turns.`);
 }
 
 Bun.serve({

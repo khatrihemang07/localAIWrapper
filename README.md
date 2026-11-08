@@ -460,7 +460,7 @@ Set these as environment variables when starting the server.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `8080` | Port to listen on (bound to `HOST`). |
-| `HOST` | `127.0.0.1` | Address to bind. Only loopback by default. Setting a non-loopback address (for example `0.0.0.0`) exposes the server, which has no authentication, to your network. |
+| `HOST` | `127.0.0.1` | Address to bind. Only loopback by default. Setting a non-loopback address (for example `0.0.0.0`) exposes the server, which has no authentication, to your network, and the server logs a warning at startup. |
 | `WORKDIR_DEFAULT` | `~/.local/share/localAIWrapper/workdir` | Folder every Turn runs in unless the request names another. Created at startup if it is the default and missing; if you set it, it must already exist. |
 | `WORKDIR_ROOTS` | (empty) | Comma-separated folders a request's `workdir` may resolve into. `WORKDIR_DEFAULT` is always included. Each entry must exist. |
 | `MAX_CONCURRENCY` | `4` | Most CLI processes running at once. Extra requests wait in a queue. |
