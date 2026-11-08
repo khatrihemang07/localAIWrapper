@@ -21,6 +21,12 @@ export type OpenAIModel = {
   object: "model";
   created: number;
   owned_by: string;
+  /**
+   * OpenRouter/vLLM convention that generic clients read to learn which request
+   * fields a model honours. Lists `reasoning_effort` only when the Model
+   * supports it; empty otherwise.
+   */
+  supported_parameters: string[];
   local_ai_wrapper: {
     backend: string;
     llm: string;
@@ -54,6 +60,7 @@ function toOpenAIModel(id: string, cfg: ModelConfig): OpenAIModel {
     object: "model",
     created: startedAt,
     owned_by: cfg.backend,
+    supported_parameters: cfg.options.reasoning_effort?.supported ? ["reasoning_effort"] : [],
     local_ai_wrapper: {
       backend: cfg.backend,
       llm: cfg.model,
@@ -87,6 +94,8 @@ export type CommandcodeModel = {
   object: "model";
   created: number;
   owned_by: "commandcode";
+  /** `["reasoning_effort"]` when the catalog lists efforts for this model, else empty. */
+  supported_parameters: string[];
   local_ai_wrapper: {
     backend: "commandcode";
     /** The text after the id's last "/", which the CLI also accepts. */
@@ -115,6 +124,7 @@ export function commandcodeModelList(
       object: "model",
       created: startedAt,
       owned_by: "commandcode",
+      supported_parameters: e.efforts && e.efforts.length > 0 ? ["reasoning_effort"] : [],
       local_ai_wrapper: {
         backend: "commandcode",
         short_name: e.shortName,

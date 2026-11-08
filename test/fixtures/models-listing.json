@@ -5,6 +5,9 @@
       "id": "claude-opus",
       "object": "model",
       "owned_by": "claude",
+      "supported_parameters": [
+        "reasoning_effort"
+      ],
       "local_ai_wrapper": {
         "backend": "claude",
         "llm": "opus",
@@ -56,6 +59,9 @@
       "id": "claude-sonnet",
       "object": "model",
       "owned_by": "claude",
+      "supported_parameters": [
+        "reasoning_effort"
+      ],
       "local_ai_wrapper": {
         "backend": "claude",
         "llm": "sonnet",
@@ -107,6 +113,9 @@
       "id": "claude-haiku",
       "object": "model",
       "owned_by": "claude",
+      "supported_parameters": [
+        "reasoning_effort"
+      ],
       "local_ai_wrapper": {
         "backend": "claude",
         "llm": "haiku",
@@ -158,6 +167,9 @@
       "id": "codex-sol",
       "object": "model",
       "owned_by": "codex",
+      "supported_parameters": [
+        "reasoning_effort"
+      ],
       "local_ai_wrapper": {
         "backend": "codex",
         "llm": "gpt-5.6-sol",
@@ -207,6 +219,9 @@
       "id": "codex-terra",
       "object": "model",
       "owned_by": "codex",
+      "supported_parameters": [
+        "reasoning_effort"
+      ],
       "local_ai_wrapper": {
         "backend": "codex",
         "llm": "gpt-5.6-terra",
@@ -256,6 +271,9 @@
       "id": "codex-luna",
       "object": "model",
       "owned_by": "codex",
+      "supported_parameters": [
+        "reasoning_effort"
+      ],
       "local_ai_wrapper": {
         "backend": "codex",
         "llm": "gpt-5.6-luna",
