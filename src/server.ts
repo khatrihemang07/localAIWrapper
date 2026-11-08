@@ -86,6 +86,16 @@ Bun.serve({
 });
 
 console.log(`localAIWrapper listening on http://${host}:${port} (max concurrency ${maxConcurrency}, turn timeout ${turnTimeoutMs}ms)`);
+if (!isLoopbackHost(host)) {
+  console.warn(`WARNING: HOST=${host} exposes this server to the network. It has no authentication; anyone who can reach ${host}:${port} can run Turns.`);
+}
+
+// True for addresses that only the local machine can reach: localhost, ::1, and
+// the 127.0.0.0/8 block that IPv4 reserves for loopback.
+function isLoopbackHost(h: string): boolean {
+  if (h === "localhost" || h === "::1") return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) && h.split(".").every((octet) => Number(octet) <= 255);
+}
 
 // Per-Turn progress logging (issue: no visibility into whether a slow
 // request is queued, running, or hung). turnId correlates every line for one

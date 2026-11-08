@@ -10,7 +10,9 @@ const REPO_DIR = join(import.meta.dir, "..");
 // sets HOST in the repo's .env must not change what "HOST unset" means here.
 const RUN_DIR = mkdtempSync(join(tmpdir(), "wrapper-host-test-"));
 
-async function listenAddress(port: number, host?: string): Promise<string> {
+const NON_LOOPBACK_WARNING = "no authentication";
+
+async function boot(port: number, host?: string): Promise<{ address: string; output: string }> {
   const env: Record<string, string> = { ...(Bun.env as Record<string, string>), PORT: String(port) };
   delete env.HOST;
   if (host !== undefined) env.HOST = host;
@@ -31,16 +33,30 @@ async function listenAddress(port: number, host?: string): Promise<string> {
       if (done) throw new Error(`server exited before listening: ${out}`);
       out += decoder.decode(value);
     }
-    reader.releaseLock();
-
     const lsof = Bun.spawnSync(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fn"]);
     const names = new TextDecoder().decode(lsof.stdout).split("\n").filter((l) => l.startsWith("n"));
     expect(names.length).toBe(1);
-    return names[0].slice(1); // e.g. "127.0.0.1:8097" or "*:8098"
+    const address = names[0].slice(1); // e.g. "127.0.0.1:8097" or "*:8098"
+
+    // The warning is printed right after the listen line, so stop the server and read
+    // everything it wrote to either stream.
+    server.kill();
+    await server.exited;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      out += decoder.decode(value);
+    }
+    const err = await new Response(server.stderr).text();
+    return { address, output: out + err };
   } finally {
     server.kill();
     await server.exited;
   }
+}
+
+async function listenAddress(port: number, host?: string): Promise<string> {
+  return (await boot(port, host)).address;
 }
 
 test("with HOST unset the server listens on loopback only", async () => {
@@ -49,4 +65,20 @@ test("with HOST unset the server listens on loopback only", async () => {
 
 test("HOST=0.0.0.0 makes the server listen on all interfaces", async () => {
   expect(await listenAddress(8098, "0.0.0.0")).toBe("*:8098");
+});
+
+test("HOST=0.0.0.0 logs a warning that the server has no authentication and is exposed to the network", async () => {
+  const { output } = await boot(8099, "0.0.0.0");
+  expect(output).toContain(NON_LOOPBACK_WARNING);
+  expect(output).toContain("network");
+});
+
+test("HOST unset does not log the non-loopback warning", async () => {
+  const { output } = await boot(8100);
+  expect(output).not.toContain(NON_LOOPBACK_WARNING);
+});
+
+test("HOST=127.0.0.1 does not log the non-loopback warning", async () => {
+  const { output } = await boot(8101, "127.0.0.1");
+  expect(output).not.toContain(NON_LOOPBACK_WARNING);
 });
