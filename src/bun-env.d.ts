@@ -52,7 +52,7 @@ interface ImportMeta {
 }
 
 // The few Node built-ins this project imports (config, workdir resolution,
-// temp files for codex's output schema, the commandcode catalog cache). Declared by hand for the same reason
+// temp files for codex's output schema, the commandcode catalog cache, HOST checks). Declared by hand for the same reason
 // as the Bun globals above: no @types/node dependency.
 declare module "node:fs" {
   export function realpathSync(path: string): string;
@@ -75,4 +75,8 @@ declare module "node:path" {
   export function join(...parts: string[]): string;
   export function isAbsolute(path: string): boolean;
   export const sep: string;
+}
+
+declare module "node:net" {
+  export function isIPv4(input: string): boolean;
 }
