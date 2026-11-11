@@ -64,6 +64,19 @@ Every setting is an environment variable put in front of the same command. All a
 
 Details for each variable are under [Configuration](#configuration).
 
+The Makefile wraps the same commands. Any variable can go after the target (`make prod PORT=9000`) or in the environment; `.env` is read too. Run `make help` for the list.
+
+| I want to… | Command |
+| --- | --- |
+| Run in the foreground (Ctrl-C stops it) | `make prod` |
+| Run in the foreground, reloading on file change | `make dev` |
+| Run in the background (log in `.run/server.log`) | `make prod-bg` or `make dev-bg` |
+| Stop, check, or follow the background server | `make stop`, `make status`, `make logs` |
+| Start with options | `make prod PORT=9000 TOOL_EMULATION=1` |
+| Unit tests, typecheck | `make test`, `make typecheck` |
+
+A second start is refused while the background server or anything else holds the port.
+
 ## Contents
 
 1. [Quick start](#quick-start)
@@ -640,7 +653,7 @@ Reasoning: `docs/adr/0010-harnesses-in-config-yaml.md`.
 ```sh
 bun run test:unit   # fast, no CLIs needed
 bun run test        # unit tests, then ./test.sh: a live suite that starts a server and calls the real CLIs
-bunx tsc --noEmit   # typecheck
+bunx --package typescript tsc --noEmit   # typecheck (plain `bunx tsc` fetches an unrelated package)
 ```
 
 `./test.sh` makes real `claude`, `codex` and `commandcode` calls, so it needs all three CLIs signed in and takes a few minutes.

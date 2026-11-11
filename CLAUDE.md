@@ -21,3 +21,7 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
+## Running
+
+Bun project (no pnpm/npm). Use the Makefile: `make help` lists targets. `make dev` / `make prod` run in the foreground; `make dev-bg` / `make prod-bg` run in the background with state in gitignored `.run/` (pid file and log); `make stop`, `make status`, `make logs`; `make test` (unit tests only; `./test.sh` makes paid CLI calls) and `make typecheck`. Config (`PORT`, `HOST`, `TOOL_EMULATION`, ...) comes from the environment or `.env`, e.g. `make prod TOOL_EMULATION=1`.
