@@ -140,3 +140,19 @@ test("a developer message is treated as a system message", () => {
   if (!p.ok) return;
   expect(p.value.messages[0]).toEqual({ role: "system", content: "dev rules" });
 });
+
+test("native <invoke> markup becomes tool calls, with JSON-decoded parameters", () => {
+  const r = parseToolReply(
+    'Looking.\n<function_calls>\n<invoke name="mastery_status">\n</invoke>\n<invoke name="ask_user">\n<parameter name="q">**/Mnemora*</parameter>\n<parameter name="limit">20</parameter>\n</invoke>\n</function_calls>',
+    names,
+  );
+  expect(r.content).toBe("Looking.");
+  expect(r.toolCalls.map((c) => c.function.name)).toEqual(["mastery_status", "ask_user"]);
+  expect(JSON.parse(r.toolCalls[0]!.function.arguments)).toEqual({});
+  expect(JSON.parse(r.toolCalls[1]!.function.arguments)).toEqual({ q: "**/Mnemora*", limit: 20 });
+});
+
+test("an <invoke> for a tool that was not offered stays prose", () => {
+  const text = '<invoke name="unknown_tool"><parameter name="a">1</parameter></invoke>';
+  expect(parseToolReply(text, names)).toEqual({ content: text, toolCalls: [] });
+});
