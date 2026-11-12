@@ -145,21 +145,31 @@ export function prepareToolEmulation(body: {
 }
 
 const BLOCK = /<tool_call>([\s\S]*?)<\/tool_call>/g;
+// Claude's native markup, which the model sometimes writes despite the prompt:
+// <invoke name="x"><parameter name="k">v</parameter></invoke>, optionally
+// inside <function_calls>. Accepted as another spelling of a tool call.
+const INVOKE = /<invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/invoke>/g;
+const PARAMETER = /<parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/parameter>/g;
+const CALLS_WRAPPER = /<\/?function_calls>/g;
 
 function stripFence(s: string): string {
   const m = s.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
   return (m ? m[1]! : s).trim();
 }
 
-/**
- * Splits a reply into prose and tool calls. Anything after the first call is
- * dropped: it can only be the model inventing a result. Blocks that do not
- * parse, or name a tool that was not offered, are ignored and stay out of the
- * calls (the prose before them is kept).
- */
-export function parseToolReply(text: string, toolNames: Set<string>): { content: string | null; toolCalls: ToolCall[] } {
-  const calls: ToolCall[] = [];
-  let firstIndex = -1;
+/** A parameter value is JSON when it parses as such (numbers, booleans, objects), else the raw string. */
+function parameterValue(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+type Found = { index: number; name: unknown; args: unknown };
+
+function findJsonBlocks(text: string): Found[] {
+  const found: Found[] = [];
   for (const match of text.matchAll(BLOCK)) {
     let obj: unknown;
     try {
@@ -168,17 +178,43 @@ export function parseToolReply(text: string, toolNames: Set<string>): { content:
       continue;
     }
     const o = obj as { name?: unknown; arguments?: unknown; parameters?: unknown };
-    if (typeof o?.name !== "string" || !toolNames.has(o.name)) continue;
-    const args = o.arguments ?? o.parameters ?? {};
-    if (typeof args !== "object" || args === null || Array.isArray(args)) continue;
-    if (firstIndex < 0) firstIndex = match.index!;
+    found.push({ index: match.index!, name: o?.name, args: o?.arguments ?? o?.parameters ?? {} });
+  }
+  return found;
+}
+
+function findInvokeBlocks(text: string): Found[] {
+  const found: Found[] = [];
+  for (const match of text.matchAll(INVOKE)) {
+    const args: Record<string, unknown> = {};
+    for (const p of match[2]!.matchAll(PARAMETER)) args[p[1]!] = parameterValue(p[2]!.trim());
+    found.push({ index: match.index!, name: match[1], args });
+  }
+  return found;
+}
+
+/**
+ * Splits a reply into prose and tool calls. Anything after the first call is
+ * dropped: it can only be the model inventing a result. Blocks that do not
+ * parse, or name a tool that was not offered, are ignored and stay out of the
+ * calls (the prose before them is kept). Both the <tool_call> JSON form and
+ * the <invoke>/<parameter> form are read.
+ */
+export function parseToolReply(text: string, toolNames: Set<string>): { content: string | null; toolCalls: ToolCall[] } {
+  const calls: ToolCall[] = [];
+  let firstIndex = -1;
+  const blocks = [...findJsonBlocks(text), ...findInvokeBlocks(text)].sort((a, b) => a.index - b.index);
+  for (const b of blocks) {
+    if (typeof b.name !== "string" || !toolNames.has(b.name)) continue;
+    if (typeof b.args !== "object" || b.args === null || Array.isArray(b.args)) continue;
+    if (firstIndex < 0) firstIndex = b.index;
     calls.push({
       id: `call_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`,
       type: "function",
-      function: { name: o.name, arguments: JSON.stringify(args) },
+      function: { name: b.name, arguments: JSON.stringify(b.args) },
     });
   }
   if (calls.length === 0) return { content: text, toolCalls: [] };
-  const prose = text.slice(0, firstIndex).trim();
+  const prose = text.slice(0, firstIndex).replace(CALLS_WRAPPER, "").trim();
   return { content: prose || null, toolCalls: calls };
 }
